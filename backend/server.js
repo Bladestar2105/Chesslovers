@@ -64,6 +64,15 @@ app.get('/api/admin/info', authenticateAdmin, (req, res) => {
   });
 });
 
+app.post('/api/admin/password', authenticateAdmin, (req, res) => {
+  const { newPassword } = req.body;
+  if (!newPassword || newPassword.length < 4) {
+    return res.status(400).json({ error: 'Password must be at least 4 characters long' });
+  }
+  db.updateAdminPassword(newPassword);
+  res.json({ success: true });
+});
+
 app.delete('/api/admin/replays/:id', authenticateAdmin, (req, res) => {
   db.deleteGame(req.params.id);
   res.json({ success: true });

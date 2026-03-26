@@ -98,5 +98,9 @@ module.exports = {
   },
   getFederationLinks: () => {
     return db.prepare('SELECT * FROM federation_links').all();
+  },
+  updateAdminPassword: (newPassword) => {
+    db.prepare('UPDATE config SET value = ? WHERE key = ?').run(newPassword, 'admin_password');
+    module.exports.adminPassword = newPassword;
   }
 };
