@@ -68,6 +68,6 @@ module.exports = {
     return db.prepare('SELECT * FROM games WHERE id = ?').get(id);
   },
   getFinishedGames: () => {
-    return db.prepare('SELECT * FROM games WHERE status IN ("mate", "stalemate", "draw", "resign", "timeout") ORDER BY created_at DESC').all();
+    return db.prepare("SELECT * FROM games WHERE status IN ('mate', 'stalemate', 'draw', 'resign', 'timeout') ORDER BY created_at DESC").all();
   }
 };
