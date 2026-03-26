@@ -2,7 +2,14 @@ const Database = require('better-sqlite3');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 
-const db = new Database(path.join(__dirname, 'chess.db'));
+const dataDir = path.join(__dirname, 'data');
+const fs = require('fs');
+
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+const db = new Database(path.join(dataDir, 'chess.db'));
 
 // Initialize schema
 db.exec(`

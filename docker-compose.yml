@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  chesslovers:
+    image: ghcr.io/bladestar2105/chesslovers:latest
+    container_name: chesslovers
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+    volumes:
+      - chesslovers_data:/app/backend/data
+
+volumes:
+  chesslovers_data:
+    name: chesslovers_data
