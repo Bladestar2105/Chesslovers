@@ -17,6 +17,8 @@ function Admin() {
   const [partnerCode, setPartnerCode] = useState('');
 
   const [activeTab, setActiveTab] = useState('info'); // 'info', 'replays', 'federation'
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordMessage, setPasswordMessage] = useState('');
 
   useEffect(() => {
     if (token) {
@@ -137,6 +139,27 @@ function Admin() {
     }
   };
 
+  const handlePasswordReset = async (e) => {
+    e.preventDefault();
+    setPasswordMessage('');
+    try {
+      const res = await fetch(`${API_URL}/api/admin/password`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ newPassword })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPasswordMessage('Password updated successfully.');
+        setNewPassword('');
+      } else {
+        setPasswordMessage(data.error || 'Failed to update password.');
+      }
+    } catch (err) {
+      setPasswordMessage('Connection error.');
+    }
+  };
+
   const handleSync = async () => {
     try {
       const res = await fetch(`${API_URL}/api/admin/federation/sync`, {
@@ -205,6 +228,27 @@ function Admin() {
           <div>
             <h3 className="font-bold text-lg border-b border-[var(--border-color)] pb-2 mb-2">System Information</h3>
             <p><span className="font-semibold">Instance ID:</span> {info.instanceId}</p>
+          </div>
+
+          <div className="mt-8 pt-4 border-t border-[var(--border-color)]">
+            <h3 className="font-bold text-lg mb-2">Reset Admin Password</h3>
+            <form onSubmit={handlePasswordReset} className="max-w-sm space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">New Password</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  className="w-full p-2 border rounded-md bg-[var(--panel-bg)] border-[var(--border-color)] text-[var(--text-color)]"
+                  required
+                  minLength={4}
+                />
+              </div>
+              <button type="submit" className="py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded">
+                Update Password
+              </button>
+              {passwordMessage && <p className="text-sm mt-2 font-medium">{passwordMessage}</p>}
+            </form>
           </div>
         </div>
       )}
