@@ -1,0 +1,111 @@
+import React, { useState, useEffect } from 'react';
+import { Chessboard } from 'react-chessboard';
+import { Chess } from 'chess.js';
+import { useTranslation } from 'react-i18next';
+
+function Replays() {
+  const { t } = useTranslation();
+  const [games, setGames] = useState([]);
+  const [selectedPgn, setSelectedPgn] = useState(null);
+  const [chess] = useState(new Chess());
+  const [currentFen, setCurrentFen] = useState(chess.fen());
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const API_URL = import.meta.env.VITE_SOCKET_URL || '';
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/replays`)
+      .then(res => res.json())
+      .then(data => setGames(data))
+      .catch(err => console.error("Error fetching replays:", err));
+  }, []);
+
+  const viewReplay = (pgn) => {
+    setSelectedPgn(pgn);
+    chess.reset();
+    if (pgn) {
+      chess.loadPgn(pgn);
+      const h = chess.history({ verbose: true });
+      setHistory(h);
+      chess.reset();
+      setHistoryIndex(-1);
+      setCurrentFen(chess.fen());
+    }
+  };
+
+  const nextMove = () => {
+    if (historyIndex < history.length - 1) {
+      const nextIdx = historyIndex + 1;
+      chess.move(history[nextIdx]);
+      setCurrentFen(chess.fen());
+      setHistoryIndex(nextIdx);
+    }
+  };
+
+  const prevMove = () => {
+    if (historyIndex >= 0) {
+      chess.undo();
+      setCurrentFen(chess.fen());
+      setHistoryIndex(historyIndex - 1);
+    }
+  };
+
+  if (selectedPgn !== null) {
+    return (
+      <div className="flex flex-col items-center">
+        <h2 className="text-2xl font-bold mb-4">{t('Replay Viewer')}</h2>
+        <div className="w-full max-w-md shadow-2xl rounded-sm overflow-hidden mb-4 border border-[var(--border-color)]">
+          <Chessboard
+            position={currentFen}
+            arePiecesDraggable={false}
+            customDarkSquareStyle={{ backgroundColor: '#779556' }}
+            customLightSquareStyle={{ backgroundColor: '#ebecd0' }}
+          />
+        </div>
+        <div className="flex gap-4">
+          <button onClick={prevMove} disabled={historyIndex === -1} className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold disabled:opacity-50">← Prev</button>
+          <button onClick={nextMove} disabled={historyIndex === history.length - 1} className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold disabled:opacity-50">Next →</button>
+        </div>
+        <button onClick={() => setSelectedPgn(null)} className="mt-8 text-blue-500 underline hover:text-blue-700">{t('Back to list')}</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto panel p-6 rounded-lg shadow-md">
+      <h1 className="text-3xl font-bold mb-6">{t('Finished Games')}</h1>
+      {games.length === 0 ? (
+        <p className="text-gray-500">No replays available yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-[var(--border-color)]">
+                <th className="p-3">Date</th>
+                <th className="p-3">Time Control</th>
+                <th className="p-3">White vs Black</th>
+                <th className="p-3">{t('Result')}</th>
+                <th className="p-3">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {games.map(g => (
+                <tr key={g.id} className="border-b border-[var(--border-color)] hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="p-3">{new Date(g.created_at).toLocaleString()}</td>
+                  <td className="p-3">{g.time_control}</td>
+                  <td className="p-3">{g.is_cpu ? 'Player vs CPU (Lvl ' + g.cpu_level + ')' : 'PvP'}</td>
+                  <td className="p-3 font-semibold uppercase">{g.status}</td>
+                  <td className="p-3">
+                    <button onClick={() => viewReplay(g.pgn)} className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors">{t('View')}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default Replays;
