@@ -1,0 +1,327 @@
+import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+
+const API_URL = import.meta.env.VITE_SOCKET_URL || '';
+
+function Admin() {
+  const { t } = useTranslation();
+  const [password, setPassword] = useState('');
+  const [token, setToken] = useState(localStorage.getItem('adminToken') || '');
+  const [error, setError] = useState('');
+
+  const [info, setInfo] = useState(null);
+  const [replays, setReplays] = useState([]);
+  const [exchangeCode, setExchangeCode] = useState('');
+
+  const [partnerUrl, setPartnerUrl] = useState('');
+  const [partnerCode, setPartnerCode] = useState('');
+
+  const [activeTab, setActiveTab] = useState('info'); // 'info', 'replays', 'federation'
+
+  useEffect(() => {
+    if (token) {
+      fetchInfo();
+      fetchReplays();
+    }
+  }, [token]);
+
+  const authHeaders = {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setError('');
+    try {
+      const res = await fetch(`${API_URL}/api/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      const data = await res.json();
+      if (res.ok && data.token) {
+        setToken(data.token);
+        localStorage.setItem('adminToken', data.token);
+      } else {
+        setError(data.error || 'Login failed');
+      }
+    } catch (err) {
+      setError('Connection error');
+    }
+  };
+
+  const handleLogout = () => {
+    setToken('');
+    localStorage.removeItem('adminToken');
+    setInfo(null);
+  };
+
+  const fetchInfo = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/info`, { headers: authHeaders });
+      if (res.ok) setInfo(await res.json());
+      else if (res.status === 401 || res.status === 403) handleLogout();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchReplays = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/replays`);
+      if (res.ok) setReplays(await res.json());
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteReplay = async (id) => {
+    if (!window.confirm('Delete this replay?')) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/replays/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders
+      });
+      if (res.ok) fetchReplays();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleClearReplays = async () => {
+    if (!window.confirm('Are you sure you want to delete ALL replays?')) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/replays`, {
+        method: 'DELETE',
+        headers: authHeaders
+      });
+      if (res.ok) fetchReplays();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleGenerateCode = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/federation/code`, {
+        method: 'POST',
+        headers: authHeaders
+      });
+      const data = await res.json();
+      if (res.ok) setExchangeCode(data.code);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleConnectPartner = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_URL}/api/admin/federation/link`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ partnerUrl, exchangeCode: partnerCode })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert('Successfully linked!');
+        setPartnerUrl('');
+        setPartnerCode('');
+        fetchInfo();
+      } else {
+        alert(data.error || 'Failed to link');
+      }
+    } catch (e) {
+      alert('Connection error');
+    }
+  };
+
+  const handleSync = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/federation/sync`, {
+        method: 'POST',
+        headers: authHeaders
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Successfully synced ${data.synced} replays from partners!`);
+        fetchReplays();
+      } else {
+        alert('Failed to sync');
+      }
+    } catch (e) {
+      alert('Connection error');
+    }
+  };
+
+  if (!token) {
+    return (
+      <div className="max-w-md mx-auto panel p-6 rounded-lg shadow-md mt-10">
+        <h2 className="text-2xl font-bold mb-4 text-center">Admin Login</h2>
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              className="w-full p-2 border rounded-md bg-[var(--panel-bg)] border-[var(--border-color)] text-[var(--text-color)]"
+              required
+            />
+          </div>
+          {error && <p className="text-red-500 text-sm">{error}</p>}
+          <button type="submit" className="w-full py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+            Login
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto panel p-6 rounded-lg shadow-md space-y-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+        <button onClick={handleLogout} className="py-2 px-4 bg-gray-500 hover:bg-gray-600 text-white rounded text-sm">
+          Logout
+        </button>
+      </div>
+
+      <div className="flex space-x-4 border-b border-[var(--border-color)] pb-2 mb-4">
+        {['info', 'replays', 'federation'].map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 capitalize rounded-t-lg transition-colors ${activeTab === tab ? 'bg-blue-600 text-white' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'info' && info && (
+        <div className="space-y-4">
+          <div>
+            <h3 className="font-bold text-lg border-b border-[var(--border-color)] pb-2 mb-2">System Information</h3>
+            <p><span className="font-semibold">Instance ID:</span> {info.instanceId}</p>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'replays' && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center border-b border-[var(--border-color)] pb-2 mb-2">
+            <h3 className="font-bold text-lg">Manage Replays</h3>
+            <button onClick={handleClearReplays} className="py-1 px-3 bg-red-600 hover:bg-red-700 text-white rounded text-sm">
+              Clear All Replays
+            </button>
+          </div>
+          {replays.length === 0 ? (
+             <p className="text-gray-500 text-center py-4">No replays found.</p>
+          ) : (
+             <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-[var(--border-color)]">
+                      <th className="p-2">Date</th>
+                      <th className="p-2">White</th>
+                      <th className="p-2">Black</th>
+                      <th className="p-2">Status</th>
+                      <th className="p-2">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {replays.map(r => (
+                      <tr key={r.id} className="border-b border-[var(--border-color)] hover:bg-black/5 dark:hover:bg-white/5">
+                        <td className="p-2">{new Date(r.created_at).toLocaleString()}</td>
+                        <td className="p-2 truncate max-w-xs">{r.white_player_id || 'Anon'}</td>
+                        <td className="p-2 truncate max-w-xs">{r.is_cpu ? `CPU Lvl ${r.cpu_level}` : (r.black_player_id || 'Anon')}</td>
+                        <td className="p-2">{r.status}</td>
+                        <td className="p-2">
+                          <button onClick={() => handleDeleteReplay(r.id)} className="text-red-500 hover:text-red-700 text-sm font-semibold">
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+             </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'federation' && (
+        <div className="space-y-6">
+          <div>
+             <h3 className="font-bold text-lg border-b border-[var(--border-color)] pb-2 mb-2">Federation Links</h3>
+             {info?.links?.length > 0 ? (
+               <ul className="list-disc list-inside mb-4">
+                 {info.links.map(link => (
+                   <li key={link.id}>{link.partner_url} <span className="text-gray-500 text-sm">({link.id})</span></li>
+                 ))}
+               </ul>
+             ) : (
+               <p className="text-gray-500 mb-4">No partner instances connected.</p>
+             )}
+
+             <button onClick={handleSync} className="py-2 px-4 bg-green-600 hover:bg-green-700 text-white rounded">
+                Sync Replays from Partners
+             </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-[var(--border-color)]">
+              <div className="panel p-4 rounded bg-black/5 dark:bg-white/5">
+                 <h4 className="font-bold mb-2">My Pairing Code</h4>
+                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                   Generate a one-time code to give to a partner instance so they can connect to you.
+                 </p>
+                 <button onClick={handleGenerateCode} className="py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded mb-2">
+                    Generate Exchange Code
+                 </button>
+                 {exchangeCode && (
+                    <div className="mt-2 text-xl font-mono p-2 bg-[var(--bg-color)] rounded border border-[var(--border-color)] text-center tracking-widest">
+                       {exchangeCode}
+                    </div>
+                 )}
+              </div>
+
+              <div className="panel p-4 rounded bg-black/5 dark:bg-white/5">
+                 <h4 className="font-bold mb-2">Connect to Partner</h4>
+                 <form onSubmit={handleConnectPartner} className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-semibold mb-1">Partner URL</label>
+                      <input
+                        type="url"
+                        placeholder="https://chess.example.com"
+                        value={partnerUrl}
+                        onChange={e => setPartnerUrl(e.target.value)}
+                        className="w-full p-2 text-sm border rounded-md bg-[var(--bg-color)] border-[var(--border-color)] text-[var(--text-color)]"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold mb-1">Partner Exchange Code</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 1a2b3c4d"
+                        value={partnerCode}
+                        onChange={e => setPartnerCode(e.target.value)}
+                        className="w-full p-2 text-sm font-mono border rounded-md bg-[var(--bg-color)] border-[var(--border-color)] text-[var(--text-color)] uppercase"
+                        required
+                      />
+                    </div>
+                    <button type="submit" className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded">
+                      Connect
+                    </button>
+                 </form>
+              </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default Admin;

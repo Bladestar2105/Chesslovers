@@ -95,7 +95,7 @@ function Game({ socket, sessionId }) {
     };
 
     // Check for pawn promotion
-    const isPawn = piece[1] === 'P';
+    const isPawn = piece && piece[1] === 'P';
     const isPromotionRank = (side === 'w' && targetSquare[1] === '8') || (side === 'b' && targetSquare[1] === '1');
 
     if (isPawn && isPromotionRank) {
@@ -105,13 +105,17 @@ function Game({ socket, sessionId }) {
     }
 
     try {
-      const result = chess.move({ ...move, promotion: 'q' });
+      // If we got here and it's not a promotion, trying to promote to 'q' will throw an error in chess.js 1.4.0
+      // So we should only pass promotion if it's a valid promotion move.
+      // But we already caught promotion above! So we just do a normal move.
+      const result = chess.move(move);
       if (result) {
         setFen(chess.fen());
         socket.emit('make_move', { gameId: id, move: result, sessionId });
         return true;
       }
     } catch (e) {
+      // If the move was invalid, chess.move throws an error
       return false;
     }
     return false;

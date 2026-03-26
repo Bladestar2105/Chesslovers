@@ -30,6 +30,12 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS federation_links (
+    id TEXT PRIMARY KEY,
+    partner_url TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Get or generate instance ID
@@ -41,9 +47,20 @@ if (!instanceIdRow) {
 }
 const instanceId = instanceIdRow.value;
 
+// Get or generate Admin Password
+let adminPasswordRow = db.prepare('SELECT value FROM config WHERE key = ?').get('admin_password');
+if (!adminPasswordRow) {
+  // Generate a random 12 character password
+  const newAdminPassword = Math.random().toString(36).slice(2, 14).padEnd(12, '0');
+  db.prepare('INSERT INTO config (key, value) VALUES (?, ?)').run('admin_password', newAdminPassword);
+  adminPasswordRow = { value: newAdminPassword };
+}
+const adminPassword = adminPasswordRow.value;
+
 module.exports = {
   db,
   instanceId,
+  adminPassword,
   saveGame: (gameData) => {
     const stmt = db.prepare(`
       INSERT INTO games (id, pgn, status, time_control, white_player_id, black_player_id, is_cpu, cpu_level)
@@ -69,5 +86,17 @@ module.exports = {
   },
   getFinishedGames: () => {
     return db.prepare("SELECT * FROM games WHERE status IN ('mate', 'stalemate', 'draw', 'resign', 'timeout') ORDER BY created_at DESC").all();
+  },
+  deleteGame: (id) => {
+    db.prepare('DELETE FROM games WHERE id = ?').run(id);
+  },
+  deleteAllReplays: () => {
+    db.prepare("DELETE FROM games WHERE status IN ('mate', 'stalemate', 'draw', 'resign', 'timeout')").run();
+  },
+  saveFederationLink: (id, partnerUrl) => {
+    db.prepare('INSERT OR REPLACE INTO federation_links (id, partner_url) VALUES (?, ?)').run(id, partnerUrl);
+  },
+  getFederationLinks: () => {
+    return db.prepare('SELECT * FROM federation_links').all();
   }
 };

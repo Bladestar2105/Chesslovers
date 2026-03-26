@@ -6,6 +6,7 @@ const { Chess } = require('chess.js');
 const { v4: uuidv4 } = require('uuid');
 const { spawn } = require('child_process');
 const path = require('path');
+const jwt = require('jsonwebtoken');
 const db = require('./db');
 
 const app = express();
@@ -21,10 +22,135 @@ const io = new Server(server, {
 });
 
 const PORT = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_chess_key';
 
 // In-memory game state
 const activeGames = new Map();
 let matchmakingQueue = [];
+let federationExchangeCodes = new Map();
+
+// Admin Auth Middleware
+const authenticateAdmin = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Missing authorization header' });
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (payload.admin) {
+      next();
+    } else {
+      res.status(403).json({ error: 'Not an admin' });
+    }
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+};
+
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body;
+  if (password === db.adminPassword) {
+    const token = jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token });
+  } else {
+    res.status(401).json({ error: 'Invalid password' });
+  }
+});
+
+app.get('/api/admin/info', authenticateAdmin, (req, res) => {
+  res.json({
+    instanceId: db.instanceId,
+    links: db.getFederationLinks()
+  });
+});
+
+app.delete('/api/admin/replays/:id', authenticateAdmin, (req, res) => {
+  db.deleteGame(req.params.id);
+  res.json({ success: true });
+});
+
+app.delete('/api/admin/replays', authenticateAdmin, (req, res) => {
+  db.deleteAllReplays();
+  res.json({ success: true });
+});
+
+app.post('/api/admin/federation/code', authenticateAdmin, (req, res) => {
+  const code = uuidv4().substring(0, 8);
+  federationExchangeCodes.set(code, Date.now());
+  res.json({ code });
+});
+
+app.post('/api/admin/federation/link', authenticateAdmin, async (req, res) => {
+  const { partnerUrl, exchangeCode } = req.body;
+  try {
+    // Basic verification of partner instance and code
+    // In a real implementation this would verify cryptographically
+    const response = await fetch(`${partnerUrl}/api/federation/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: exchangeCode, instanceId: db.instanceId })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      db.saveFederationLink(data.partnerInstanceId, partnerUrl);
+      res.json({ success: true, partnerInstanceId: data.partnerInstanceId });
+    } else {
+      res.status(400).json({ error: 'Failed to link with partner' });
+    }
+  } catch (e) {
+    res.status(500).json({ error: 'Error connecting to partner' });
+  }
+});
+
+app.post('/api/federation/verify', (req, res) => {
+  const { code, instanceId } = req.body;
+  if (federationExchangeCodes.has(code)) {
+    // Code valid
+    federationExchangeCodes.delete(code); // One time use
+    // If we wanted 2-way link, we could save the partner here too,
+    // but the partnerUrl isn't provided in this simple flow unless passed.
+    res.json({ success: true, partnerInstanceId: db.instanceId });
+  } else {
+    res.status(400).json({ error: 'Invalid or expired exchange code' });
+  }
+});
+
+app.post('/api/admin/federation/sync', authenticateAdmin, async (req, res) => {
+  const links = db.getFederationLinks();
+  let syncCount = 0;
+
+  for (const link of links) {
+    try {
+      // Fetch replays from partner
+      const response = await fetch(`${link.partner_url}/api/replays`);
+      if (response.ok) {
+        const games = await response.json();
+        for (const game of games) {
+          // Check if we already have it. If not, save.
+          const existing = db.getGame(game.id);
+          if (!existing) {
+            db.saveGame({
+              id: game.id,
+              pgn: game.pgn,
+              status: game.status,
+              timeControl: game.time_control,
+              white: game.white_player_id,
+              black: game.black_player_id,
+              isCpu: game.is_cpu === 1,
+              cpuLevel: game.cpu_level
+            });
+            syncCount++;
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`Failed to sync with ${link.partner_url}`, e);
+    }
+  }
+
+  res.json({ success: true, synced: syncCount });
+});
 
 app.get('/api/info', (req, res) => {
   res.json({ instanceId: db.instanceId });
@@ -427,4 +553,6 @@ function checkGameEnd(game) {
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Instance ID: ${db.instanceId}`);
+  console.log(`Admin Password: ${db.adminPassword}`);
 });
