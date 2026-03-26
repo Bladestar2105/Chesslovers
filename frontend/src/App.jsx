@@ -8,7 +8,7 @@ import Game from './pages/Game';
 import Replays from './pages/Replays';
 import { Sun, Moon, Globe } from 'lucide-react';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || '';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined;
 
 function App() {
   const { t, i18n } = useTranslation();
