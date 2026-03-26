@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import Home from './pages/Home';
 import Game from './pages/Game';
 import Replays from './pages/Replays';
+import Admin from './pages/Admin';
 import { Sun, Moon, Globe } from 'lucide-react';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined;
@@ -68,6 +69,7 @@ function App() {
           <div className="flex gap-4 items-center">
             <Link to="/" className="text-2xl font-bold">{t('Play Chess')}</Link>
             <Link to="/replays" className="hover:underline">{t('Replays')}</Link>
+            <Link to="/admin" className="hover:underline">Admin</Link>
           </div>
           <div className="flex gap-4">
             <button onClick={toggleLanguage} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700" title={t('Language')}>
@@ -84,6 +86,7 @@ function App() {
             <Route path="/" element={<Home socket={socket} sessionId={sessionId} />} />
             <Route path="/game/:id" element={<Game socket={socket} sessionId={sessionId} />} />
             <Route path="/replays" element={<Replays />} />
+            <Route path="/admin" element={<Admin />} />
           </Routes>
         </main>
       </div>
