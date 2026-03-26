@@ -1,0 +1,17 @@
+--- frontend/src/pages/Game.jsx
++++ frontend/src/pages/Game.jsx
+@@ -87,6 +87,14 @@
+   }, [socket, id, sessionId, chess, side, t]);
+
+   const onDrop = (sourceSquare, targetSquare, piece) => {
++    console.log("onDrop arguments:", sourceSquare, targetSquare, piece);
++
++    if (typeof sourceSquare === 'object' && sourceSquare !== null && 'sourceSquare' in sourceSquare) {
++        targetSquare = sourceSquare.targetSquare;
++        piece = sourceSquare.piece;
++        sourceSquare = sourceSquare.sourceSquare;
++    }
++
+     if (status !== 'active' || chess.turn() !== side) return false;
+
+     const move = {

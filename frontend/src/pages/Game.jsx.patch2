@@ -1,0 +1,26 @@
+--- frontend/src/pages/Game.jsx
++++ frontend/src/pages/Game.jsx
+@@ -109,6 +109,7 @@
+     }
+
+     try {
++      const moveObj = { from: sourceSquare, to: targetSquare, promotion: 'q' };
+       // If we got here and it's not a promotion, trying to promote to 'q' will throw an error in chess.js 1.4.0
+       // So we should only pass promotion if it's a valid promotion move.
+       // But we already caught promotion above! So we just do a normal move.
+-      const result = chess.move(move);
++      // In chess.js, normal moves are fine with { from, to, promotion: 'q' } historically, but 1.4.0 throws.
++      // BUT WAIT, if we don't pass promotion, does it promote by default? No.
++      const result = chess.move(move);
+       if (result) {
+         setFen(chess.fen());
+         socket.emit('make_move', { gameId: id, move: result, sessionId });
+         return true;
+       }
+     } catch (e) {
+       // If the move was invalid, chess.move throws an error
+       return false;
+     }
+-    return true; // Return true to tell react-chessboard the move is valid, to prevent snapback. Wait, wait, if result is valid we already return true. Why would it snap back? Because we update state before returning true, but if our fen matches the move, it shouldn't snap back. Wait, the problem is we are returning false when the move is valid if we don't return inside `if(result)`? No, we return true there. The issue is `chess.move()` throws in chess.js 1.4.0, which means we return false.
++    return false;
+   };
