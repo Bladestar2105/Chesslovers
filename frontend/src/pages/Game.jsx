@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Chessboard } from 'react-chessboard';
+import { Chessboard, ChessboardDnDProvider } from 'react-chessboard';
 import { Chess } from 'chess.js';
 import { useTranslation } from 'react-i18next';
 
@@ -143,14 +143,15 @@ function Game({ socket, sessionId }) {
   }, [chess]);
 
   const onDrop = (sourceSquare, targetSquare, piece) => {
-    // Handle different argument patterns from react-chessboard
-    if (typeof sourceSquare === 'object' && sourceSquare !== null && 'sourceSquare' in sourceSquare) {
-      targetSquare = sourceSquare.targetSquare;
-      piece = sourceSquare.piece;
-      sourceSquare = sourceSquare.sourceSquare;
+    console.log('onDrop called:', { sourceSquare, targetSquare, piece, turn: chess.turn(), side, status });
+    
+    if (status !== 'active') {
+      console.log('Game not active');
+      return false;
     }
-
-    if (status !== 'active' || chess.turn() !== side) {
+    
+    if (chess.turn() !== side) {
+      console.log('Not your turn');
       return false;
     }
 
@@ -168,6 +169,7 @@ function Game({ socket, sessionId }) {
 
     try {
       const result = chess.move(move);
+      console.log('Move result:', result);
 
       if (result) {
         setFen(chess.fen());
@@ -328,14 +330,16 @@ function Game({ socket, sessionId }) {
         )}
 
         <div className="w-full max-w-lg shadow-2xl rounded-sm overflow-hidden border border-[var(--border-color)]">
-          <Chessboard
-            position={fen}
-            onPieceDrop={onDrop}
-            boardOrientation={side === 'w' ? 'white' : 'black'}
-            customDarkSquareStyle={{ backgroundColor: '#779556' }}
-            customLightSquareStyle={{ backgroundColor: '#ebecd0' }}
-            customSquareStyles={getCustomSquareStyles()}
-          />
+          <ChessboardDnDProvider>
+            <Chessboard
+              position={fen}
+              onPieceDrop={onDrop}
+              boardOrientation={side === 'w' ? 'white' : 'black'}
+              customDarkSquareStyle={{ backgroundColor: '#779556' }}
+              customLightSquareStyle={{ backgroundColor: '#ebecd0' }}
+              customSquareStyles={getCustomSquareStyles()}
+            />
+          </ChessboardDnDProvider>
         </div>
 
         <div className="flex gap-4 w-full max-w-lg mt-4">
