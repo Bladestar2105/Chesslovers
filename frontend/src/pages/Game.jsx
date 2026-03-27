@@ -39,7 +39,11 @@ function Game({ socket, sessionId }) {
 
     const onGameJoined = (data) => {
       setSide(data.side);
-      chess.load(data.fen);
+      if (data.pgn) {
+        chess.loadPgn(data.pgn);
+      } else {
+        chess.load(data.fen);
+      }
       setFen(data.fen);
       setIsCpu(data.isCpu);
       setTimeControl(data.timeControl);
@@ -51,11 +55,9 @@ function Game({ socket, sessionId }) {
       // Update move history from PGN
       if (data.pgn) {
         try {
-          const tempChess = new Chess();
-          tempChess.loadPgn(data.pgn);
-          setMoveHistory(tempChess.history({ verbose: true }));
+          setMoveHistory(chess.history({ verbose: true }));
         } catch (e) {
-          console.error('Error loading PGN:', e);
+          console.error('Error getting history:', e);
         }
       }
     };
@@ -65,7 +67,7 @@ function Game({ socket, sessionId }) {
     };
 
     const onMoveMade = (data) => {
-      chess.load(data.fen);
+      chess.loadPgn(data.pgn);
       setFen(data.fen);
       if (data.whiteTime !== undefined) setWhiteTime(data.whiteTime);
       if (data.blackTime !== undefined) setBlackTime(data.blackTime);
@@ -75,7 +77,7 @@ function Game({ socket, sessionId }) {
       setIsInCheck(chess.isCheck());
       
       // Update move history
-      setMoveHistory(prev => [...prev, data.move]);
+      setMoveHistory(chess.history({ verbose: true }));
     };
 
     const onGameOver = ({ reason, winner }) => {
