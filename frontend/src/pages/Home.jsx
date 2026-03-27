@@ -10,6 +10,11 @@ function Home({ socket, sessionId }) {
   const [timeControl, setTimeControl] = useState('10|0');
   const [waiting, setWaiting] = useState(false);
   const [friendGameId, setFriendGameId] = useState('');
+  const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') || '');
+
+  useEffect(() => {
+    localStorage.setItem('playerName', playerName);
+  }, [playerName]);
 
   useEffect(() => {
     if (!socket) return;
@@ -39,16 +44,17 @@ function Home({ socket, sessionId }) {
   }, [socket, navigate]);
 
   const handleStart = () => {
+    const nameToUse = playerName.trim() || undefined;
     if (mode === 'cpu') {
-      socket.emit('create_game', { isCpu: true, cpuLevel: parseInt(difficulty), timeControl, sessionId });
+      socket.emit('create_game', { isCpu: true, cpuLevel: parseInt(difficulty), timeControl, sessionId, playerName: nameToUse });
     } else if (mode === 'friend') {
       if (friendGameId) {
-        socket.emit('join_friend_game', { gameId: friendGameId, timeControl, sessionId });
+        socket.emit('join_friend_game', { gameId: friendGameId, timeControl, sessionId, playerName: nameToUse });
       } else {
-        socket.emit('create_game', { isCpu: false, timeControl, sessionId });
+        socket.emit('create_game', { isCpu: false, timeControl, sessionId, playerName: nameToUse });
       }
     } else if (mode === 'random') {
-      socket.emit('find_random', { timeControl, sessionId });
+      socket.emit('find_random', { timeControl, sessionId, playerName: nameToUse });
     }
   };
 
@@ -84,6 +90,20 @@ function Home({ socket, sessionId }) {
               className="w-full"
             />
             <div className="text-center">{difficulty}</div>
+          </div>
+        )}
+
+        {(mode === 'friend' || mode === 'random') && (
+          <div>
+            <label className="block text-sm font-medium mb-1">{t('Nickname (optional)')}</label>
+            <input
+              type="text"
+              value={playerName}
+              onChange={(e) => setPlayerName(e.target.value)}
+              maxLength={20}
+              placeholder={t('Enter nickname...')}
+              className="w-full p-2 border rounded-md bg-[var(--panel-bg)] border-[var(--border-color)] text-[var(--text-color)] mb-4"
+            />
           </div>
         )}
 
