@@ -11,6 +11,7 @@ function Replays() {
   const [currentFen, setCurrentFen] = useState(chess.fen());
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [error, setError] = useState('');
   const API_URL = import.meta.env.VITE_SOCKET_URL || '';
 
   useEffect(() => {
@@ -22,12 +23,31 @@ function Replays() {
 
   const viewReplay = (pgn) => {
     setSelectedPgn(pgn);
+    setError('');
     chess.reset();
-    if (pgn) {
-      chess.loadPgn(pgn);
-      const h = chess.history({ verbose: true });
-      setHistory(h);
-      chess.reset();
+    
+    if (pgn && pgn.trim()) {
+      try {
+        const result = chess.loadPgn(pgn);
+        if (result) {
+          const h = chess.history({ verbose: true });
+          setHistory(h);
+          chess.reset();
+          setHistoryIndex(-1);
+          setCurrentFen(chess.fen());
+        } else {
+          setError('Failed to load PGN');
+          setHistory([]);
+          setHistoryIndex(-1);
+        }
+      } catch (e) {
+        console.error("PGN parse error:", e);
+        setError('Invalid PGN format');
+        setHistory([]);
+        setHistoryIndex(-1);
+      }
+    } else {
+      setHistory([]);
       setHistoryIndex(-1);
       setCurrentFen(chess.fen());
     }
@@ -36,9 +56,13 @@ function Replays() {
   const nextMove = () => {
     if (historyIndex < history.length - 1) {
       const nextIdx = historyIndex + 1;
-      chess.move(history[nextIdx]);
-      setCurrentFen(chess.fen());
-      setHistoryIndex(nextIdx);
+      try {
+        chess.move(history[nextIdx]);
+        setCurrentFen(chess.fen());
+        setHistoryIndex(nextIdx);
+      } catch (e) {
+        console.error("Error making move:", e);
+      }
     }
   };
 
@@ -50,10 +74,31 @@ function Replays() {
     }
   };
 
+  const goToStart = () => {
+    chess.reset();
+    setCurrentFen(chess.fen());
+    setHistoryIndex(-1);
+  };
+
+  const goToEnd = () => {
+    while (historyIndex < history.length - 1) {
+      chess.move(history[historyIndex + 1]);
+      setHistoryIndex(prev => prev + 1);
+    }
+    setCurrentFen(chess.fen());
+  };
+
   if (selectedPgn !== null) {
     return (
       <div className="flex flex-col items-center">
         <h2 className="text-2xl font-bold mb-4">{t('Replay Viewer')}</h2>
+        
+        {error && (
+          <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
+            {error}
+          </div>
+        )}
+        
         <div className="w-full max-w-md shadow-2xl rounded-sm overflow-hidden mb-4 border border-[var(--border-color)]">
           <Chessboard
             position={currentFen}
@@ -62,11 +107,54 @@ function Replays() {
             customLightSquareStyle={{ backgroundColor: '#ebecd0' }}
           />
         </div>
-        <div className="flex gap-4">
-          <button onClick={prevMove} disabled={historyIndex === -1} className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold disabled:opacity-50">← Prev</button>
-          <button onClick={nextMove} disabled={historyIndex === history.length - 1} className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold disabled:opacity-50">Next →</button>
+        
+        {/* Move info */}
+        <div className="mb-4 text-center">
+          <span className="text-gray-600 dark:text-gray-400">
+            Move {historyIndex + 1} of {history.length}
+          </span>
+          {historyIndex >= 0 && history[historyIndex] && (
+            <span className="ml-4 font-mono font-bold">
+              {history[historyIndex].san}
+            </span>
+          )}
         </div>
-        <button onClick={() => setSelectedPgn(null)} className="mt-8 text-blue-500 underline hover:text-blue-700">{t('Back to list')}</button>
+        
+        {/* Navigation buttons */}
+        <div className="flex gap-2">
+          <button 
+            onClick={goToStart} 
+            disabled={historyIndex === -1} 
+            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold disabled:opacity-50"
+          >
+            ⏮ Start
+          </button>
+          <button 
+            onClick={prevMove} 
+            disabled={historyIndex === -1} 
+            className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold disabled:opacity-50"
+          >
+            ← Prev
+          </button>
+          <button 
+            onClick={nextMove} 
+            disabled={historyIndex === history.length - 1} 
+            className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold disabled:opacity-50"
+          >
+            Next →
+          </button>
+          <button 
+            onClick={goToEnd} 
+            disabled={historyIndex === history.length - 1} 
+            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold disabled:opacity-50"
+          >
+            End ⏭
+          </button>
+        </div>
+        
+        <button onClick={() => setSelectedPgn(null)} className="mt-8 text-blue-500 underline hover:text-blue-700">
+          {t('Back to list')}
+        </button>
       </div>
     );
   }
@@ -96,7 +184,12 @@ function Replays() {
                   <td className="p-3">{g.is_cpu ? 'Player vs CPU (Lvl ' + g.cpu_level + ')' : 'PvP'}</td>
                   <td className="p-3 font-semibold uppercase">{g.status}</td>
                   <td className="p-3">
-                    <button onClick={() => viewReplay(g.pgn)} className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors">{t('View')}</button>
+                    <button 
+                      onClick={() => viewReplay(g.pgn)} 
+                      className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors"
+                    >
+                      {t('View')}
+                    </button>
                   </td>
                 </tr>
               ))}

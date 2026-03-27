@@ -25,7 +25,27 @@ const resources = {
       "White": "White",
       "Black": "Black",
       "Result": "Result",
-      "View": "View"
+      "View": "View",
+      "You": "You",
+      "Opponent": "Opponent",
+      "Are you sure you want to resign?": "Are you sure you want to resign?",
+      "Draw offer sent.": "Draw offer sent.",
+      "Opponent offered a draw. Accept?": "Opponent offered a draw. Accept?",
+      "Choose Promotion": "Choose Promotion",
+      "Cancel": "Cancel",
+      "Checkmate! You win!": "Checkmate! You win!",
+      "Checkmate! You lose.": "Checkmate! You lose.",
+      "Stalemate - Draw": "Stalemate - Draw",
+      "Opponent resigned. You win!": "Opponent resigned. You win!",
+      "You resigned.": "You resigned.",
+      "Opponent ran out of time. You win!": "Opponent ran out of time. You win!",
+      "You ran out of time.": "You ran out of time.",
+      "CHECK!": "CHECK!",
+      "Moves": "Moves",
+      "No moves yet": "No moves yet",
+      "Finished Games": "Finished Games",
+      "Replay Viewer": "Replay Viewer",
+      "Back to list": "Back to list"
     }
   },
   de: {
@@ -51,7 +71,27 @@ const resources = {
       "White": "Weiß",
       "Black": "Schwarz",
       "Result": "Ergebnis",
-      "View": "Ansehen"
+      "View": "Ansehen",
+      "You": "Du",
+      "Opponent": "Gegner",
+      "Are you sure you want to resign?": "Bist du sicher, dass du aufgeben möchtest?",
+      "Draw offer sent.": "Remis-Angebot gesendet.",
+      "Opponent offered a draw. Accept?": "Gegner bietet Remis an. Annehmen?",
+      "Choose Promotion": "Bauernumwandlung wählen",
+      "Cancel": "Abbrechen",
+      "Checkmate! You win!": "Schachmatt! Du gewinnst!",
+      "Checkmate! You lose.": "Schachmatt! Du verlierst.",
+      "Stalemate - Draw": "Patt - Unentschieden",
+      "Opponent resigned. You win!": "Gegner hat aufgegeben. Du gewinnst!",
+      "You resigned.": "Du hast aufgegeben.",
+      "Opponent ran out of time. You win!": "Gegners Zeit ist abgelaufen. Du gewinnst!",
+      "You ran out of time.": "Deine Zeit ist abgelaufen.",
+      "CHECK!": "SCHACH!",
+      "Moves": "Züge",
+      "No moves yet": "Noch keine Züge",
+      "Finished Games": "Beendete Spiele",
+      "Replay Viewer": "Spielanzeige",
+      "Back to list": "Zurück zur Liste"
     }
   }
 };
@@ -60,7 +100,7 @@ i18n
   .use(initReactI18next)
   .init({
     resources,
-    lng: "en", // default language
+    lng: "en",
     fallbackLng: "en",
     interpolation: {
       escapeValue: false
