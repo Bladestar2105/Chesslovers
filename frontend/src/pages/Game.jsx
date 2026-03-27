@@ -87,7 +87,15 @@ function Game({ socket, sessionId }) {
   }, [socket, id, sessionId, chess, side, t]);
 
   const onDrop = (sourceSquare, targetSquare, piece) => {
-    if (status !== 'active' || chess.turn() !== side) return false;
+    if (typeof sourceSquare === 'object' && sourceSquare !== null && 'sourceSquare' in sourceSquare) {
+        targetSquare = sourceSquare.targetSquare;
+        piece = sourceSquare.piece;
+        sourceSquare = sourceSquare.sourceSquare;
+    }
+
+    if (status !== 'active' || chess.turn() !== side) {
+      return false;
+    }
 
     const move = {
       from: sourceSquare,
@@ -105,11 +113,26 @@ function Game({ socket, sessionId }) {
     }
 
     try {
-      const result = chess.move({
+      // Create a move object
+      const moveData = {
           from: sourceSquare,
-          to: targetSquare,
-          promotion: 'q' // always promote to queen if not handled above (e.g. piece dropping instead of square clicking)
-      });
+          to: targetSquare
+      };
+
+      // If we're promoting, chess.move expects the promotion piece to be specified
+      // Only attach the promotion property if it's a valid promotion move.
+      // (The chess.js library throws an exception if you pass promotion for a non-promotion move)
+      const possibleMoves = chess.moves({ verbose: true });
+      const isPromotionMove = possibleMoves.some(
+        (m) => m.from === sourceSquare && m.to === targetSquare && m.promotion
+      );
+
+      if (isPromotionMove) {
+        moveData.promotion = 'q'; // Default to Queen, promotion dialog overrides this later
+      }
+
+      const result = chess.move(moveData);
+
       if (result) {
         setFen(chess.fen());
         socket.emit('make_move', { gameId: id, move: result, sessionId });

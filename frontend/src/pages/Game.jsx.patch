@@ -1,9 +1,17 @@
 --- frontend/src/pages/Game.jsx
 +++ frontend/src/pages/Game.jsx
-@@ -118,7 +118,7 @@
-       // If the move was invalid, chess.move throws an error
-       return false;
-     }
--    return false; // Return false so react-chessboard drops the piece back if not a valid move. Wait, wait, actually react-chessboard v5 needs 'true' returned if the drop is valid. We are returning true inside `if (result)`.
-+    return true; // Return true to tell react-chessboard the move is valid, to prevent snapback. Wait, wait, if result is valid we already return true. Why would it snap back? Because we update state before returning true, but if our fen matches the move, it shouldn't snap back. Wait, the problem is we are returning false when the move is valid if we don't return inside `if(result)`? No, we return true there. The issue is `chess.move()` throws in chess.js 1.4.0, which means we return false.
-   };
+@@ -87,6 +87,14 @@
+   }, [socket, id, sessionId, chess, side, t]);
+
+   const onDrop = (sourceSquare, targetSquare, piece) => {
++    console.log("onDrop arguments:", sourceSquare, targetSquare, piece);
++
++    if (typeof sourceSquare === 'object' && sourceSquare !== null && 'sourceSquare' in sourceSquare) {
++        targetSquare = sourceSquare.targetSquare;
++        piece = sourceSquare.piece;
++        sourceSquare = sourceSquare.sourceSquare;
++    }
++
+     if (status !== 'active' || chess.turn() !== side) return false;
+
+     const move = {
