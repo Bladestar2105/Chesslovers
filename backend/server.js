@@ -181,6 +181,12 @@ const sendStockfishCmd = (engine, cmd) => {
   engine.postMessage(cmd);
 };
 
+const parseTimeControl = (tc) => {
+  if (tc === 'unlimited') return { base: null, inc: null };
+  const parts = tc.split('|');
+  return { base: parseInt(parts[0]) * 60, inc: parseInt(parts[1]) };
+};
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
@@ -199,12 +205,6 @@ io.on('connection', (socket) => {
       socket.emit('rejoin_failed');
     }
   });
-
-  const parseTimeControl = (tc) => {
-    if (tc === 'unlimited') return { base: null, inc: null };
-    const parts = tc.split('|');
-    return { base: parseInt(parts[0]) * 60, inc: parseInt(parts[1]) };
-  };
 
   socket.on('create_game', ({ isCpu, cpuLevel, timeControl, sessionId }) => {
     const gameId = uuidv4();
