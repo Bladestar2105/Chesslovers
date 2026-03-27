@@ -206,8 +206,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('create_game', ({ isCpu, cpuLevel, timeControl, sessionId }) => {
-    const gameId = uuidv4();
+  socket.on('create_game', ({ isCpu, cpuLevel, timeControl, sessionId, customGameId }) => {
+    // Generate an 8-character ID if it's a friend game and no customGameId was provided
+    // This makes it easy to share. Keep uuid for cpu games or random if desired.
+    const gameId = customGameId ? customGameId : (isCpu ? uuidv4() : Math.random().toString(36).substring(2, 10));
     const chess = new Chess();
 
     const tc = parseTimeControl(timeControl);
@@ -284,6 +286,45 @@ io.on('connection', (socket) => {
     });
 
     socket.emit('game_created', { gameId, side: 'w' });
+  });
+
+  socket.on('join_friend_game', ({ gameId, timeControl, sessionId }) => {
+    // Treat joining via explicit ID like creating or joining if exists
+    const existing = activeGames.get(gameId);
+    if (existing) {
+       // If game exists, just have them join it
+       socket.emit('game_created', { gameId }); // Directs them to /game/:id
+    } else {
+       // Have to do the same logic as create_game but using customGameId
+       // We can't just emit 'create_game' to ourselves in socket.io, so we must extract the logic
+       const chess = new Chess();
+       const tc = parseTimeControl(timeControl);
+       const time = tc.base;
+       const gameData = {
+         id: gameId,
+         chess,
+         white: sessionId,
+         black: null,
+         isCpu: false,
+         timeControl,
+         status: 'active',
+         whiteTime: time,
+         blackTime: time,
+         lastMoveTime: null
+       };
+       activeGames.set(gameId, gameData);
+       socket.join(gameId);
+       db.saveGame({
+         id: gameId,
+         pgn: chess.pgn(),
+         status: 'active',
+         timeControl,
+         white: sessionId,
+         black: null,
+         isCpu: false
+       });
+       socket.emit('game_created', { gameId, side: 'w' });
+    }
   });
 
   socket.on('join_game', ({ gameId, sessionId }) => {

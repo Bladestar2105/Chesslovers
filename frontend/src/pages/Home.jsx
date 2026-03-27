@@ -9,6 +9,7 @@ function Home({ socket, sessionId }) {
   const [difficulty, setDifficulty] = useState(1);
   const [timeControl, setTimeControl] = useState('10|0');
   const [waiting, setWaiting] = useState(false);
+  const [friendGameId, setFriendGameId] = useState('');
 
   useEffect(() => {
     if (!socket) return;
@@ -41,7 +42,11 @@ function Home({ socket, sessionId }) {
     if (mode === 'cpu') {
       socket.emit('create_game', { isCpu: true, cpuLevel: parseInt(difficulty), timeControl, sessionId });
     } else if (mode === 'friend') {
-      socket.emit('create_game', { isCpu: false, timeControl, sessionId });
+      if (friendGameId) {
+        socket.emit('join_friend_game', { gameId: friendGameId, timeControl, sessionId });
+      } else {
+        socket.emit('create_game', { isCpu: false, timeControl, sessionId });
+      }
     } else if (mode === 'random') {
       socket.emit('find_random', { timeControl, sessionId });
     }
@@ -79,6 +84,19 @@ function Home({ socket, sessionId }) {
               className="w-full"
             />
             <div className="text-center">{difficulty}</div>
+          </div>
+        )}
+
+        {mode === 'friend' && (
+          <div>
+            <label className="block text-sm font-medium mb-1">{t('Game ID')} ({t('optional to join')})</label>
+            <input
+              type="text"
+              value={friendGameId}
+              onChange={(e) => setFriendGameId(e.target.value)}
+              placeholder={t('Enter Game ID to join...')}
+              className="w-full p-2 border rounded-md bg-[var(--panel-bg)] border-[var(--border-color)] text-[var(--text-color)]"
+            />
           </div>
         )}
 

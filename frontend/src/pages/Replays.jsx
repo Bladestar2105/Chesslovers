@@ -28,18 +28,12 @@ function Replays() {
     
     if (pgn && pgn.trim()) {
       try {
-        const result = chess.loadPgn(pgn);
-        if (result) {
-          const h = chess.history({ verbose: true });
-          setHistory(h);
-          chess.reset();
-          setHistoryIndex(-1);
-          setCurrentFen(chess.fen());
-        } else {
-          setError('Failed to load PGN');
-          setHistory([]);
-          setHistoryIndex(-1);
-        }
+        chess.loadPgn(pgn);
+        const h = chess.history({ verbose: true });
+        setHistory(h);
+        chess.reset();
+        setHistoryIndex(-1);
+        setCurrentFen(chess.fen());
       } catch (e) {
         console.error("PGN parse error:", e);
         setError('Invalid PGN format');
@@ -178,7 +172,7 @@ function Replays() {
             </thead>
             <tbody>
               {games.map(g => (
-                <tr key={g.id} className="border-b border-[var(--border-color)] hover:bg-gray-50 dark:hover:bg-gray-800">
+                <tr key={g.id} className="border-b border-[var(--border-color)] hover:bg-gray-100 dark:hover:bg-gray-800 text-[var(--text-color)]">
                   <td className="p-3">{new Date(g.created_at).toLocaleString()}</td>
                   <td className="p-3">{g.time_control}</td>
                   <td className="p-3">{g.is_cpu ? 'Player vs CPU (Lvl ' + g.cpu_level + ')' : 'PvP'}</td>

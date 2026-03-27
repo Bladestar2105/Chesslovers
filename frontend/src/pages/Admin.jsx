@@ -216,7 +216,7 @@ function Admin() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 capitalize rounded-t-lg transition-colors ${activeTab === tab ? 'bg-blue-600 text-white' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+            className={`px-4 py-2 capitalize rounded-t-lg transition-colors ${activeTab === tab ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'}`}
           >
             {tab}
           </button>
