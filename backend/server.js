@@ -206,7 +206,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('create_game', ({ isCpu, cpuLevel, timeControl, sessionId, customGameId }) => {
+  socket.on('create_game', ({ isCpu, cpuLevel, timeControl, sessionId, customGameId, playerName }) => {
     // Generate an 8-character ID if it's a friend game and no customGameId was provided
     // This makes it easy to share. Keep uuid for cpu games or random if desired.
     const gameId = customGameId ? customGameId : (isCpu ? uuidv4() : Math.random().toString(36).substring(2, 10));
@@ -219,7 +219,9 @@ io.on('connection', (socket) => {
       id: gameId,
       chess,
       white: sessionId,
+      whiteName: playerName,
       black: isCpu ? 'cpu' : null,
+      blackName: isCpu ? 'CPU' : null,
       isCpu,
       cpuLevel,
       timeControl,
@@ -288,7 +290,7 @@ io.on('connection', (socket) => {
     socket.emit('game_created', { gameId, side: 'w' });
   });
 
-  socket.on('join_friend_game', ({ gameId, timeControl, sessionId }) => {
+  socket.on('join_friend_game', ({ gameId, timeControl, sessionId, playerName }) => {
     // Treat joining via explicit ID like creating or joining if exists
     const existing = activeGames.get(gameId);
     if (existing) {
@@ -304,6 +306,7 @@ io.on('connection', (socket) => {
          id: gameId,
          chess,
          white: sessionId,
+      whiteName: playerName,
          black: null,
          isCpu: false,
          timeControl,
@@ -327,7 +330,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('join_game', ({ gameId, sessionId }) => {
+  socket.on('join_game', ({ gameId, sessionId, playerName }) => {
     const game = activeGames.get(gameId);
     if (!game) {
       return socket.emit('error', 'Game not found');
@@ -336,15 +339,15 @@ io.on('connection', (socket) => {
     socket.join(gameId);
 
     if (game.white === sessionId) {
-      socket.emit('game_joined', { gameId, side: 'w', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime });
+      socket.emit('game_joined', { gameId, side: 'w', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName });
       if (game.black) {
-        socket.emit('player_joined', { message: 'Opponent is here' });
+        socket.emit('player_joined', { message: 'Opponent is here', blackName: game.blackName, whiteName: game.whiteName });
       }
       return;
     }
 
     if (game.black === sessionId) {
-      socket.emit('game_joined', { gameId, side: 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime });
+      socket.emit('game_joined', { gameId, side: 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName });
       return;
     }
 
@@ -353,12 +356,14 @@ io.on('connection', (socket) => {
     }
 
     game.black = sessionId;
-    // Set start time for first move if game starts now
-    if (game.timeControl !== 'unlimited') {
-        game.lastMoveTime = Date.now();
+    if (playerName) {
+      game.blackName = playerName;
     }
-    socket.emit('game_joined', { gameId, side: 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime });
-    io.to(gameId).emit('player_joined', { message: 'Black has joined' });
+
+    // Ensure timer doesn't start until the first move is made
+    game.lastMoveTime = null;
+    socket.emit('game_joined', { gameId, side: 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName });
+    io.to(gameId).emit('player_joined', { message: 'Black has joined', blackName: game.blackName, whiteName: game.whiteName });
 
     db.saveGame({
         id: game.id,
@@ -372,7 +377,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('find_random', ({ timeControl, sessionId }) => {
+  socket.on('find_random', ({ timeControl, sessionId, playerName }) => {
     // Basic matchmaking
     const opponent = matchmakingQueue.find(p => p.timeControl === timeControl && p.sessionId !== sessionId);
     if (opponent) {
@@ -387,13 +392,15 @@ io.on('connection', (socket) => {
         id: gameId,
         chess,
         white: opponent.sessionId,
+        whiteName: opponent.playerName,
         black: sessionId,
+        blackName: playerName,
         isCpu: false,
         timeControl,
         status: 'active',
         whiteTime: time,
         blackTime: time,
-        lastMoveTime: time !== null ? Date.now() : null
+        lastMoveTime: null
       };
       activeGames.set(gameId, gameData);
 
@@ -415,7 +422,7 @@ io.on('connection', (socket) => {
         isCpu: false
       });
     } else {
-      matchmakingQueue.push({ socketId: socket.id, sessionId, timeControl });
+      matchmakingQueue.push({ socketId: socket.id, sessionId, timeControl, playerName });
       socket.emit('waiting_for_opponent');
     }
   });
@@ -516,6 +523,27 @@ io.on('connection', (socket) => {
             cpuLevel: game.cpuLevel
       });
       activeGames.delete(gameId);
+  });
+
+  socket.on('timeout', ({ gameId }) => {
+      const game = activeGames.get(gameId);
+      if (!game || game.status !== 'active' || game.timeControl === 'unlimited' || !game.lastMoveTime) return;
+
+      const now = Date.now();
+      const elapsed = (now - game.lastMoveTime) / 1000;
+      const turn = game.chess.turn();
+
+      if (turn === 'w' && game.whiteTime - elapsed <= 1) { // 1 second grace
+          game.whiteTime = 0;
+          game.status = 'timeout';
+          io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'black' });
+          saveAndRemoveGame(game);
+      } else if (turn === 'b' && game.blackTime - elapsed <= 1) {
+          game.blackTime = 0;
+          game.status = 'timeout';
+          io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'white' });
+          saveAndRemoveGame(game);
+      }
   });
 
   socket.on('disconnect', () => {

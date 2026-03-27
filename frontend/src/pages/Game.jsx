@@ -24,6 +24,8 @@ function Game({ socket, sessionId }) {
   const [blackTime, setBlackTime] = useState(null);
   const [lastMoveTime, setLastMoveTime] = useState(null);
   const [timeControl, setTimeControl] = useState('unlimited');
+  const [whiteName, setWhiteName] = useState('');
+  const [blackName, setBlackName] = useState('');
 
   // Promotion Dialog State
   const [showPromotionDialog, setShowPromotionDialog] = useState(false);
@@ -35,7 +37,8 @@ function Game({ socket, sessionId }) {
   useEffect(() => {
     if (!socket) return;
 
-    socket.emit('join_game', { gameId: id, sessionId });
+    const playerName = localStorage.getItem('playerName') || '';
+    socket.emit('join_game', { gameId: id, sessionId, playerName });
 
     const onGameJoined = (data) => {
       setSide(data.side);
@@ -50,6 +53,8 @@ function Game({ socket, sessionId }) {
       setWhiteTime(data.whiteTime);
       setBlackTime(data.blackTime);
       setLastMoveTime(data.lastMoveTime);
+      if (data.whiteName) setWhiteName(data.whiteName);
+      if (data.blackName) setBlackName(data.blackName);
       setWaitingForOpponent(data.isCpu ? false : (data.side === 'w' && !data.lastMoveTime && data.timeControl !== 'unlimited'));
       
       // Update move history from PGN
@@ -62,8 +67,10 @@ function Game({ socket, sessionId }) {
       }
     };
 
-    const onPlayerJoined = () => {
+    const onPlayerJoined = (data) => {
       setWaitingForOpponent(false);
+      if (data.blackName) setBlackName(data.blackName);
+      if (data.whiteName) setWhiteName(data.whiteName);
     };
 
     const onMoveMade = (data) => {
@@ -231,9 +238,17 @@ function Game({ socket, sessionId }) {
       const turn = chess.turn();
 
       if (turn === 'w') {
-        setWhiteTime(prev => Math.max(0, prev - elapsed));
+        setWhiteTime(prev => {
+          const newTime = Math.max(0, prev - elapsed);
+          if (newTime === 0 && prev > 0) socket.emit('timeout', { gameId: id, sessionId });
+          return newTime;
+        });
       } else {
-        setBlackTime(prev => Math.max(0, prev - elapsed));
+        setBlackTime(prev => {
+          const newTime = Math.max(0, prev - elapsed);
+          if (newTime === 0 && prev > 0) socket.emit('timeout', { gameId: id, sessionId });
+          return newTime;
+        });
       }
       setLastMoveTime(now);
     }, 100);
@@ -282,32 +297,22 @@ function Game({ socket, sessionId }) {
   };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
+    <div className="flex flex-col lg:flex-row gap-6 items-center lg:items-start justify-center">
       {/* Main game area */}
-      <div className="flex flex-col items-center space-y-4">
-        <div className="flex justify-between w-full max-w-lg mb-2 items-end">
+      <div className="flex flex-col items-center space-y-2 lg:space-y-4 w-full max-w-lg px-2 lg:px-0">
+        {/* Opponent Info (Top) */}
+        <div className="flex justify-between w-full items-end mb-1">
           <div>
-            <div className="text-xl font-bold">
-              {t('You')} ({side === 'w' ? t('White') : t('Black')})
-              {isInCheck && chess.turn() === side && status === 'active' && (
-                <span className="ml-2 text-red-500 font-bold">{t('CHECK!')}</span>
-              )}
-            </div>
-            {timeControl !== 'unlimited' && (
-              <div className={`text-2xl font-mono ${myTime < 30 ? 'text-red-500' : ''}`}>
-                {formatTime(myTime)}
-              </div>
-            )}
-          </div>
-          <div className="text-right">
-            <div className="text-xl font-bold">
-              {waitingForOpponent ? t('Waiting for opponent...') : (isCpu ? 'CPU' : t('Opponent'))}
+            <div className="text-lg font-bold">
+              {waitingForOpponent ? t('Waiting for opponent...') : (isCpu ? 'CPU' : ((side === 'w' ? blackName : whiteName) || t('Opponent')))}
               {isInCheck && chess.turn() !== side && status === 'active' && (
                 <span className="ml-2 text-red-500 font-bold">{t('CHECK!')}</span>
               )}
             </div>
+          </div>
+          <div className="text-right">
             {timeControl !== 'unlimited' && (
-              <div className={`text-2xl font-mono text-gray-600 dark:text-gray-400 ${oppTime < 30 ? 'text-red-500' : ''}`}>
+              <div className={`text-2xl font-mono bg-[var(--panel-bg)] px-3 py-1 rounded shadow-sm border border-[var(--border-color)] text-gray-700 dark:text-gray-300 ${oppTime < 30 && status === 'active' ? 'text-red-500 font-bold dark:text-red-400' : ''}`}>
                 {formatTime(oppTime)}
               </div>
             )}
@@ -344,7 +349,26 @@ function Game({ socket, sessionId }) {
           </ChessboardDnDProvider>
         </div>
 
-        <div className="flex gap-4 w-full max-w-lg mt-4">
+        {/* Player Info (Bottom) */}
+        <div className="flex justify-between w-full items-start mt-1">
+          <div>
+            <div className="text-lg font-bold">
+              {(side === 'w' ? whiteName : blackName) || t('You')} ({side === 'w' ? t('White') : t('Black')})
+              {isInCheck && chess.turn() === side && status === 'active' && (
+                <span className="ml-2 text-red-500 font-bold">{t('CHECK!')}</span>
+              )}
+            </div>
+          </div>
+          <div className="text-right">
+            {timeControl !== 'unlimited' && (
+              <div className={`text-3xl font-mono bg-[var(--panel-bg)] px-3 py-1 rounded shadow-sm border border-[var(--border-color)] ${myTime < 30 && status === 'active' ? 'text-red-500 font-bold dark:text-red-400' : 'text-[var(--text-color)]'}`}>
+                {formatTime(myTime)}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-4 w-full max-w-lg mt-2 lg:mt-4">
           <button
             onClick={handleResign}
             disabled={status !== 'active'}
