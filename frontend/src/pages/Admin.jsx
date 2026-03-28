@@ -11,10 +11,8 @@ function Admin() {
 
   const [info, setInfo] = useState(null);
   const [replays, setReplays] = useState([]);
-  const [exchangeCode, setExchangeCode] = useState('');
-
   const [partnerUrl, setPartnerUrl] = useState('');
-  const [partnerCode, setPartnerCode] = useState('');
+  const [partnerId, setPartnerId] = useState('');
 
   const [activeTab, setActiveTab] = useState('info'); // 'info', 'replays', 'federation'
   const [newPassword, setNewPassword] = useState('');
@@ -104,32 +102,19 @@ function Admin() {
     }
   };
 
-  const handleGenerateCode = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/admin/federation/code`, {
-        method: 'POST',
-        headers: authHeaders
-      });
-      const data = await res.json();
-      if (res.ok) setExchangeCode(data.code);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   const handleConnectPartner = async (e) => {
     e.preventDefault();
     try {
       const res = await fetch(`${API_URL}/api/admin/federation/link`, {
         method: 'POST',
         headers: authHeaders,
-        body: JSON.stringify({ partnerUrl, exchangeCode: partnerCode })
+        body: JSON.stringify({ partnerUrl, partnerId })
       });
       const data = await res.json();
       if (res.ok) {
         alert('Successfully linked!');
         setPartnerUrl('');
-        setPartnerCode('');
+        setPartnerId('');
         fetchInfo();
       } else {
         alert(data.error || 'Failed to link');
@@ -157,6 +142,19 @@ function Admin() {
       }
     } catch (err) {
       setPasswordMessage('Connection error.');
+    }
+  };
+
+  const handleDeleteLink = async (id) => {
+    if (!window.confirm('Remove this partner?')) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/federation/link/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders
+      });
+      if (res.ok) fetchInfo();
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -299,13 +297,47 @@ function Admin() {
       {activeTab === 'federation' && (
         <div className="space-y-6">
           <div>
-             <h3 className="font-bold text-lg border-b border-[var(--border-color)] pb-2 mb-2">Federation Links</h3>
+             <div className="flex justify-between items-center border-b border-[var(--border-color)] pb-2 mb-2">
+               <h3 className="font-bold text-lg">Federation Links</h3>
+               <span className="text-sm bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100 px-2 py-1 rounded font-bold">
+                 v{info?.version || '1.0.0'}
+               </span>
+             </div>
              {info?.links?.length > 0 ? (
-               <ul className="list-disc list-inside mb-4">
-                 {info.links.map(link => (
-                   <li key={link.id}>{link.partner_url} <span className="text-gray-500 text-sm">({link.id})</span></li>
-                 ))}
-               </ul>
+               <div className="overflow-x-auto mb-4">
+                 <table className="w-full text-left border-collapse">
+                   <thead>
+                     <tr className="border-b border-[var(--border-color)] text-sm">
+                       <th className="p-2">URL</th>
+                       <th className="p-2">ID</th>
+                       <th className="p-2 text-center">Status</th>
+                       <th className="p-2 text-center">Version</th>
+                       <th className="p-2 text-center">Actions</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {info.links.map(link => (
+                       <tr key={link.id} className="border-b border-[var(--border-color)] hover:bg-black/5 dark:hover:bg-white/5 text-sm">
+                         <td className="p-2 font-mono">{link.partner_url}</td>
+                         <td className="p-2 truncate max-w-[150px]" title={link.id}>{link.id}</td>
+                         <td className="p-2 text-center">
+                           {link.isActive ? (
+                             <span className="text-green-600 font-bold">Online</span>
+                           ) : (
+                             <span className="text-red-600 font-bold">Offline</span>
+                           )}
+                         </td>
+                         <td className="p-2 text-center">{link.version || '?'}</td>
+                         <td className="p-2 text-center">
+                           <button onClick={() => handleDeleteLink(link.id)} className="text-red-500 hover:text-red-700 font-semibold">
+                             Remove
+                           </button>
+                         </td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
              ) : (
                <p className="text-gray-500 mb-4">No partner instances connected.</p>
              )}
@@ -316,29 +348,24 @@ function Admin() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-[var(--border-color)]">
-              <div className="panel p-4 rounded bg-black/5 dark:bg-white/5">
-                 <h4 className="font-bold mb-2">My Pairing Code</h4>
+              <div className="panel p-4 rounded bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center text-center">
+                 <h4 className="font-bold mb-2 text-xl">My Instance ID</h4>
                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                   Generate a one-time code to give to a partner instance so they can connect to you.
+                   Share this ID and your URL with the partner admin to establish a connection.
                  </p>
-                 <button onClick={handleGenerateCode} className="py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded mb-2">
-                    Generate Exchange Code
-                 </button>
-                 {exchangeCode && (
-                    <div className="mt-2 text-xl font-mono p-2 bg-[var(--bg-color)] rounded border border-[var(--border-color)] text-center tracking-widest">
-                       {exchangeCode}
-                    </div>
-                 )}
+                 <div className="w-full mt-2 text-lg font-mono p-4 bg-[var(--bg-color)] rounded border border-[var(--border-color)] tracking-wider break-all shadow-inner">
+                    {info?.instanceId}
+                 </div>
               </div>
 
               <div className="panel p-4 rounded bg-black/5 dark:bg-white/5">
-                 <h4 className="font-bold mb-2">Connect to Partner</h4>
-                 <form onSubmit={handleConnectPartner} className="space-y-3">
+                 <h4 className="font-bold mb-2 text-xl border-b border-[var(--border-color)] pb-2">Add Partner</h4>
+                 <form onSubmit={handleConnectPartner} className="space-y-4 mt-4">
                     <div>
-                      <label className="block text-xs font-semibold mb-1">Partner URL</label>
+                      <label className="block text-sm font-semibold mb-1">Partner URL</label>
                       <input
                         type="url"
-                        placeholder="https://chess.example.com"
+                        placeholder="https://partner-chess.example.com"
                         value={partnerUrl}
                         onChange={e => setPartnerUrl(e.target.value)}
                         className="w-full p-2 text-sm border rounded-md bg-[var(--bg-color)] border-[var(--border-color)] text-[var(--text-color)]"
@@ -346,18 +373,18 @@ function Admin() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold mb-1">Partner Exchange Code</label>
+                      <label className="block text-sm font-semibold mb-1">Partner Instance ID</label>
                       <input
                         type="text"
-                        placeholder="e.g. 1a2b3c4d"
-                        value={partnerCode}
-                        onChange={e => setPartnerCode(e.target.value)}
-                        className="w-full p-2 text-sm font-mono border rounded-md bg-[var(--bg-color)] border-[var(--border-color)] text-[var(--text-color)] uppercase"
+                        placeholder="e.g. 9e742e07-a3b8-4345-9c89-792e09217a1c"
+                        value={partnerId}
+                        onChange={e => setPartnerId(e.target.value)}
+                        className="w-full p-2 text-sm font-mono border rounded-md bg-[var(--bg-color)] border-[var(--border-color)] text-[var(--text-color)]"
                         required
                       />
                     </div>
-                    <button type="submit" className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded">
-                      Connect
+                    <button type="submit" className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition-colors mt-2">
+                      Save Link
                     </button>
                  </form>
               </div>

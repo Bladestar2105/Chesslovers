@@ -99,6 +99,12 @@ module.exports = {
   getFederationLinks: () => {
     return db.prepare('SELECT * FROM federation_links').all();
   },
+  getFederationLink: (id) => {
+    return db.prepare('SELECT * FROM federation_links WHERE id = ?').get(id);
+  },
+  deleteFederationLink: (id) => {
+    db.prepare('DELETE FROM federation_links WHERE id = ?').run(id);
+  },
   updateAdminPassword: (newPassword) => {
     db.prepare('UPDATE config SET value = ? WHERE key = ?').run(newPassword, 'admin_password');
     module.exports.adminPassword = newPassword;

@@ -8,6 +8,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
+const pkg = require('./package.json');
 
 const app = express();
 app.use(cors());
@@ -23,11 +24,13 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_chess_key';
+const VERSION = pkg.version;
 
 // In-memory game state
 const activeGames = new Map();
 let matchmakingQueue = [];
 let federationExchangeCodes = new Map();
+const federationStatus = new Map(); // id -> { isActive: boolean, version: string, lastSeen: number }
 
 // Admin Auth Middleware
 const authenticateAdmin = (req, res, next) => {
@@ -58,9 +61,20 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 app.get('/api/admin/info', authenticateAdmin, (req, res) => {
+  const links = db.getFederationLinks().map(link => {
+    const status = federationStatus.get(link.id) || { isActive: false, version: 'unknown', lastSeen: null };
+    return {
+      ...link,
+      isActive: status.isActive,
+      version: status.version,
+      lastSeen: status.lastSeen
+    };
+  });
+
   res.json({
     instanceId: db.instanceId,
-    links: db.getFederationLinks()
+    version: VERSION,
+    links
   });
 });
 
@@ -83,45 +97,25 @@ app.delete('/api/admin/replays', authenticateAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/admin/federation/code', authenticateAdmin, (req, res) => {
-  const code = uuidv4().substring(0, 8);
-  federationExchangeCodes.set(code, Date.now());
-  res.json({ code });
+app.delete('/api/admin/federation/link/:id', authenticateAdmin, (req, res) => {
+  db.deleteFederationLink(req.params.id);
+  federationStatus.delete(req.params.id);
+  res.json({ success: true });
 });
 
 app.post('/api/admin/federation/link', authenticateAdmin, async (req, res) => {
-  const { partnerUrl, exchangeCode } = req.body;
-  try {
-    // Basic verification of partner instance and code
-    // In a real implementation this would verify cryptographically
-    const response = await fetch(`${partnerUrl}/api/federation/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: exchangeCode, instanceId: db.instanceId })
-    });
+  const { partnerUrl, partnerId } = req.body;
 
-    if (response.ok) {
-      const data = await response.json();
-      db.saveFederationLink(data.partnerInstanceId, partnerUrl);
-      res.json({ success: true, partnerInstanceId: data.partnerInstanceId });
-    } else {
-      res.status(400).json({ error: 'Failed to link with partner' });
-    }
-  } catch (e) {
-    res.status(500).json({ error: 'Error connecting to partner' });
+  if (!partnerUrl || !partnerId) {
+    return res.status(400).json({ error: 'partnerUrl and partnerId are required' });
   }
-});
 
-app.post('/api/federation/verify', (req, res) => {
-  const { code, instanceId } = req.body;
-  if (federationExchangeCodes.has(code)) {
-    // Code valid
-    federationExchangeCodes.delete(code); // One time use
-    // If we wanted 2-way link, we could save the partner here too,
-    // but the partnerUrl isn't provided in this simple flow unless passed.
-    res.json({ success: true, partnerInstanceId: db.instanceId });
-  } else {
-    res.status(400).json({ error: 'Invalid or expired exchange code' });
+  try {
+    // Simply save the link locally since both admins will do this manually
+    db.saveFederationLink(partnerId, partnerUrl);
+    res.json({ success: true, partnerInstanceId: partnerId });
+  } catch (e) {
+    res.status(500).json({ error: 'Error saving partner link' });
   }
 });
 
@@ -162,12 +156,198 @@ app.post('/api/admin/federation/sync', authenticateAdmin, async (req, res) => {
 });
 
 app.get('/api/info', (req, res) => {
-  res.json({ instanceId: db.instanceId });
+  res.json({ instanceId: db.instanceId, version: VERSION });
 });
+
+// Heartbeat interval to check federation partners
+setInterval(async () => {
+  const links = db.getFederationLinks();
+  for (const link of links) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+      const response = await fetch(`${link.partner_url}/api/info`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        // Verify they are who they say they are
+        if (data.instanceId === link.id) {
+          federationStatus.set(link.id, {
+            isActive: true,
+            version: data.version,
+            lastSeen: Date.now()
+          });
+        } else {
+          // ID mismatch! Mark offline.
+          federationStatus.set(link.id, {
+            isActive: false,
+            version: 'id_mismatch',
+            lastSeen: federationStatus.get(link.id)?.lastSeen || null
+          });
+        }
+      } else {
+        throw new Error('Not OK');
+      }
+    } catch (e) {
+      federationStatus.set(link.id, {
+        isActive: false,
+        version: federationStatus.get(link.id)?.version || 'unknown',
+        lastSeen: federationStatus.get(link.id)?.lastSeen || null
+      });
+    }
+  }
+}, 10000); // Check every 10 seconds
 
 app.get('/api/replays', (req, res) => {
   const games = db.getFinishedGames();
   res.json(games);
+});
+
+app.post('/api/federation/sync-event', (req, res) => {
+  const { initiatorInstanceId, event, data } = req.body;
+
+  if (!initiatorInstanceId || !db.getFederationLink(initiatorInstanceId)) {
+    return res.status(401).json({ error: 'Unauthorized federation partner' });
+  }
+
+  const game = activeGames.get(data.gameId);
+  if (!game) {
+    return res.status(404).json({ error: 'Game not found locally' });
+  }
+
+  if (event === 'move') {
+    try {
+      const result = game.chess.move(data.move);
+      if (result) {
+        // Sync time variables exact from partner if they sent them, else compute
+        if (data.whiteTime !== undefined) game.whiteTime = data.whiteTime;
+        if (data.blackTime !== undefined) game.blackTime = data.blackTime;
+        if (data.lastMoveTime !== undefined) game.lastMoveTime = data.lastMoveTime;
+        else updateGameTime(game);
+
+        io.to(game.id).emit('move_made', {
+            fen: game.chess.fen(),
+            pgn: game.chess.pgn(),
+            whiteTime: game.whiteTime,
+            blackTime: game.blackTime,
+            lastMoveTime: game.lastMoveTime
+        });
+        checkGameEnd(game, true); // true = avoid sending back federation event
+        saveToDb(game);
+      }
+    } catch (e) {
+      console.error('Invalid federated move received', e);
+    }
+  } else if (event === 'resign') {
+    game.status = 'resign';
+    io.to(game.id).emit('game_over', { reason: 'resign', winner: data.winner });
+    saveAndRemoveGame(game);
+  } else if (event === 'offer_draw') {
+    io.to(game.id).emit('draw_offered');
+  } else if (event === 'accept_draw') {
+    game.status = 'draw';
+    io.to(game.id).emit('game_over', { reason: 'draw' });
+    saveAndRemoveGame(game);
+  } else if (event === 'timeout') {
+    game.status = 'timeout';
+    io.to(game.id).emit('game_over', { reason: 'timeout', winner: data.winner });
+    saveAndRemoveGame(game);
+  }
+
+  res.json({ success: true });
+});
+
+function saveToDb(game) {
+  db.saveGame({
+      id: game.id,
+      pgn: game.chess.pgn(),
+      status: game.status,
+      timeControl: game.timeControl,
+      white: game.white,
+      black: game.black,
+      isCpu: game.isCpu,
+      cpuLevel: game.cpuLevel
+  });
+}
+
+function sendFederationEvent(game, event, data) {
+  if (game.federationPartnerUrl) {
+    fetch(`${game.federationPartnerUrl}/api/federation/sync-event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        initiatorInstanceId: db.instanceId,
+        event,
+        data: { gameId: game.id, ...data }
+      })
+    }).catch(e => console.error(`Failed to send federation event ${event}`, e));
+  }
+}
+
+app.post('/api/federation/matchmaking', (req, res) => {
+  const { timeControl, sessionId, playerName, initiatorInstanceId } = req.body;
+
+  if (!initiatorInstanceId || !db.getFederationLink(initiatorInstanceId)) {
+    return res.status(401).json({ error: 'Unauthorized federation partner' });
+  }
+
+  const opponent = matchmakingQueue.find(p => p.timeControl === timeControl);
+  if (opponent) {
+    // Remove from queue
+    matchmakingQueue = matchmakingQueue.filter(p => p.socketId !== opponent.socketId);
+
+    const gameId = uuidv4();
+    const chess = new Chess();
+    const tc = parseTimeControl(timeControl);
+    const time = tc.base;
+
+    // Remote player will be black, local player white
+    const gameData = {
+      id: gameId,
+      chess,
+      white: opponent.sessionId,
+      whiteName: opponent.playerName,
+      black: sessionId,
+      blackName: playerName,
+      isCpu: false,
+      timeControl,
+      status: 'active',
+      whiteTime: time,
+      blackTime: time,
+      lastMoveTime: null
+    };
+    activeGames.set(gameId, gameData);
+
+    // Notify local player
+    io.to(opponent.socketId).emit('game_started', { gameId, side: 'w' });
+
+    // Join local player to room
+    io.sockets.sockets.get(opponent.socketId)?.join(gameId);
+
+    db.saveGame({
+      id: gameData.id,
+      pgn: gameData.chess.pgn(),
+      status: gameData.status,
+      timeControl: gameData.timeControl,
+      white: gameData.white,
+      black: gameData.black,
+      isCpu: false
+    });
+
+    // Update local gameData to be aware of federation
+    const link = db.getFederationLink(initiatorInstanceId);
+    if (link) {
+      gameData.federationPartnerUrl = link.partner_url;
+      gameData.federationPartnerId = initiatorInstanceId;
+    }
+
+    // Return success to the federated instance
+    res.json({ matchFound: true, gameId, side: 'b', gameData: { ...gameData, chess: undefined } });
+  } else {
+    res.json({ matchFound: false });
+  }
 });
 
 // Serve static frontend files
@@ -377,54 +557,137 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('find_random', ({ timeControl, sessionId, playerName }) => {
-    // Basic matchmaking
-    const opponent = matchmakingQueue.find(p => p.timeControl === timeControl && p.sessionId !== sessionId);
-    if (opponent) {
-      // Remove from queue
-      matchmakingQueue = matchmakingQueue.filter(p => p.socketId !== opponent.socketId);
+  socket.on('find_random', async ({ timeControl, sessionId, playerName }) => {
+    // Gather all possible targets: local queue + active, compatible federation links
+    const targets = ['local'];
+    const links = db.getFederationLinks();
 
-      const gameId = uuidv4();
-      const chess = new Chess();
-      const tc = parseTimeControl(timeControl);
-      const time = tc.base;
-      const gameData = {
-        id: gameId,
-        chess,
-        white: opponent.sessionId,
-        whiteName: opponent.playerName,
-        black: sessionId,
-        blackName: playerName,
-        isCpu: false,
-        timeControl,
-        status: 'active',
-        whiteTime: time,
-        blackTime: time,
-        lastMoveTime: null
-      };
-      activeGames.set(gameId, gameData);
-
-      // Notify both
-      io.to(opponent.socketId).emit('game_started', { gameId, side: 'w' });
-      socket.emit('game_started', { gameId, side: 'b' });
-
-      // Join rooms
-      socket.join(gameId);
-      io.sockets.sockets.get(opponent.socketId)?.join(gameId);
-
-      db.saveGame({
-        id: gameData.id,
-        pgn: gameData.chess.pgn(),
-        status: gameData.status,
-        timeControl: gameData.timeControl,
-        white: gameData.white,
-        black: gameData.black,
-        isCpu: false
-      });
-    } else {
-      matchmakingQueue.push({ socketId: socket.id, sessionId, timeControl, playerName });
-      socket.emit('waiting_for_opponent');
+    for (const link of links) {
+      const status = federationStatus.get(link.id);
+      // Ensure the partner is online and on the same version
+      if (status && status.isActive && status.version === VERSION) {
+        targets.push(link);
+      }
     }
+
+    // Fisher-Yates Shuffle to randomize the order of targets
+    for (let i = targets.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [targets[i], targets[j]] = [targets[j], targets[i]];
+    }
+
+    for (const target of targets) {
+      if (target === 'local') {
+        const opponent = matchmakingQueue.find(p => p.timeControl === timeControl && p.sessionId !== sessionId);
+        if (opponent) {
+          // Remove from queue
+          matchmakingQueue = matchmakingQueue.filter(p => p.socketId !== opponent.socketId);
+
+          const gameId = uuidv4();
+          const chess = new Chess();
+          const tc = parseTimeControl(timeControl);
+          const time = tc.base;
+          const gameData = {
+            id: gameId,
+            chess,
+            white: opponent.sessionId,
+            whiteName: opponent.playerName,
+            black: sessionId,
+            blackName: playerName,
+            isCpu: false,
+            timeControl,
+            status: 'active',
+            whiteTime: time,
+            blackTime: time,
+            lastMoveTime: null
+          };
+          activeGames.set(gameId, gameData);
+
+          // Notify both
+          io.to(opponent.socketId).emit('game_started', { gameId, side: 'w' });
+          socket.emit('game_started', { gameId, side: 'b' });
+
+          // Join rooms
+          socket.join(gameId);
+          io.sockets.sockets.get(opponent.socketId)?.join(gameId);
+
+          db.saveGame({
+            id: gameData.id,
+            pgn: gameData.chess.pgn(),
+            status: gameData.status,
+            timeControl: gameData.timeControl,
+            white: gameData.white,
+            black: gameData.black,
+            isCpu: false
+          });
+          return; // Match found and started, exit completely
+        }
+      } else {
+        // Target is a federation link
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+
+          const response = await fetch(`${target.partner_url}/api/federation/matchmaking`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timeControl, sessionId, playerName, initiatorInstanceId: db.instanceId }),
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data.matchFound) {
+              const partnerGameId = data.gameId;
+              const gameId = partnerGameId; // Use the exact same game ID locally
+
+              const chess = new Chess();
+
+              const gameData = {
+                 id: gameId,
+                 chess,
+                 white: data.gameData.white,
+                 whiteName: data.gameData.whiteName,
+                 black: data.gameData.black,
+                 blackName: data.gameData.blackName,
+                 isCpu: false,
+                 timeControl: data.gameData.timeControl,
+                 status: 'active',
+                 whiteTime: data.gameData.whiteTime,
+                 blackTime: data.gameData.blackTime,
+                 lastMoveTime: null,
+                 federationPartnerUrl: target.partner_url,
+                 federationPartnerId: target.id
+              };
+
+              activeGames.set(gameId, gameData);
+              socket.join(gameId);
+
+              db.saveGame({
+                 id: gameData.id,
+                 pgn: gameData.chess.pgn(),
+                 status: gameData.status,
+                 timeControl: gameData.timeControl,
+                 white: gameData.white,
+                 black: gameData.black,
+                 isCpu: false
+              });
+
+              socket.emit('game_started', { gameId, side: 'b' });
+              return; // Match found and started, exit completely
+            }
+          }
+        } catch (e) {
+          console.error(`Failed to check matchmaking with ${target.partner_url}`, e.message);
+        }
+      }
+    }
+
+    // Still no match across ANY target, wait locally
+    matchmakingQueue.push({ socketId: socket.id, sessionId, timeControl, playerName });
+    socket.emit('waiting_for_opponent');
   });
 
   socket.on('make_move', ({ gameId, move, sessionId }) => {
@@ -449,17 +712,9 @@ io.on('connection', (socket) => {
             lastMoveTime: game.lastMoveTime
         });
         checkGameEnd(game);
+        saveToDb(game);
 
-        db.saveGame({
-            id: game.id,
-            pgn: game.chess.pgn(),
-            status: game.status,
-            timeControl: game.timeControl,
-            white: game.white,
-            black: game.black,
-            isCpu: game.isCpu,
-            cpuLevel: game.cpuLevel
-        });
+        sendFederationEvent(game, 'move', { move, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime });
 
         // If playing against CPU, trigger CPU move
         if (game.isCpu && game.status === 'active' && game.chess.turn() === 'b') {
@@ -482,18 +737,9 @@ io.on('connection', (socket) => {
         game.status = 'resign';
         const winner = game.white === sessionId ? 'black' : 'white';
         io.to(gameId).emit('game_over', { reason: 'resign', winner });
+        saveAndRemoveGame(game);
 
-        db.saveGame({
-            id: game.id,
-            pgn: game.chess.pgn(),
-            status: 'resign',
-            timeControl: game.timeControl,
-            white: game.white,
-            black: game.black,
-            isCpu: game.isCpu,
-            cpuLevel: game.cpuLevel
-        });
-        activeGames.delete(gameId);
+        sendFederationEvent(game, 'resign', { winner });
     }
   });
 
@@ -505,6 +751,8 @@ io.on('connection', (socket) => {
       const opponent = game.white === sessionId ? game.black : game.white;
       // In a real app we'd map session to socket, for now just broadcast
       socket.to(gameId).emit('draw_offered');
+
+      sendFederationEvent(game, 'offer_draw', {});
   });
 
   socket.on('accept_draw', ({ gameId }) => {
@@ -512,17 +760,9 @@ io.on('connection', (socket) => {
       if (!game) return;
       game.status = 'draw';
       io.to(gameId).emit('game_over', { reason: 'draw' });
-      db.saveGame({
-            id: game.id,
-            pgn: game.chess.pgn(),
-            status: 'draw',
-            timeControl: game.timeControl,
-            white: game.white,
-            black: game.black,
-            isCpu: game.isCpu,
-            cpuLevel: game.cpuLevel
-      });
-      activeGames.delete(gameId);
+      saveAndRemoveGame(game);
+
+      sendFederationEvent(game, 'accept_draw', {});
   });
 
   socket.on('timeout', ({ gameId }) => {
@@ -538,11 +778,13 @@ io.on('connection', (socket) => {
           game.status = 'timeout';
           io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'black' });
           saveAndRemoveGame(game);
+          sendFederationEvent(game, 'timeout', { winner: 'black' });
       } else if (turn === 'b' && game.blackTime - elapsed <= 1) {
           game.blackTime = 0;
           game.status = 'timeout';
           io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'white' });
           saveAndRemoveGame(game);
+          sendFederationEvent(game, 'timeout', { winner: 'white' });
       }
   });
 
@@ -588,11 +830,13 @@ setInterval(() => {
             game.status = 'timeout';
             io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'black' });
             saveAndRemoveGame(game);
+            sendFederationEvent(game, 'timeout', { winner: 'black' });
         } else if (turn === 'b' && game.blackTime - elapsed <= 0) {
             game.blackTime = 0;
             game.status = 'timeout';
             io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'white' });
             saveAndRemoveGame(game);
+            sendFederationEvent(game, 'timeout', { winner: 'white' });
         }
     }
 }, 1000);
@@ -618,14 +862,17 @@ function saveAndRemoveGame(game) {
     activeGames.delete(game.id);
 }
 
-function checkGameEnd(game) {
+function checkGameEnd(game, suppressFederationEvent = false) {
   if (game.chess.isGameOver()) {
     let reason = 'draw';
     if (game.chess.isCheckmate()) reason = 'mate';
     if (game.chess.isStalemate()) reason = 'stalemate';
     game.status = reason;
-    io.to(game.id).emit('game_over', { reason, winner: reason === 'mate' ? (game.chess.turn() === 'w' ? 'black' : 'white') : null });
+    const winner = reason === 'mate' ? (game.chess.turn() === 'w' ? 'black' : 'white') : null;
+    io.to(game.id).emit('game_over', { reason, winner });
     saveAndRemoveGame(game);
+    // Move handles mate inside chess logic, no explicit send event here needed usually
+    // because it relies purely on FEN sync.
   }
 }
 
