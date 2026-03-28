@@ -15,6 +15,7 @@ function Admin() {
 
   const [partnerUrl, setPartnerUrl] = useState('');
   const [partnerCode, setPartnerCode] = useState('');
+  const [myUrl, setMyUrl] = useState('');
 
   const [activeTab, setActiveTab] = useState('info'); // 'info', 'replays', 'federation'
   const [newPassword, setNewPassword] = useState('');
@@ -123,13 +124,14 @@ function Admin() {
       const res = await fetch(`${API_URL}/api/admin/federation/link`, {
         method: 'POST',
         headers: authHeaders,
-        body: JSON.stringify({ partnerUrl, exchangeCode: partnerCode })
+        body: JSON.stringify({ partnerUrl, exchangeCode: partnerCode, myUrl })
       });
       const data = await res.json();
       if (res.ok) {
         alert('Successfully linked!');
         setPartnerUrl('');
         setPartnerCode('');
+        setMyUrl('');
         fetchInfo();
       } else {
         alert(data.error || 'Failed to link');
@@ -354,6 +356,16 @@ function Admin() {
                         onChange={e => setPartnerCode(e.target.value)}
                         className="w-full p-2 text-sm font-mono border rounded-md bg-[var(--bg-color)] border-[var(--border-color)] text-[var(--text-color)] uppercase"
                         required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold mb-1">My Instance URL (Optional for 2-way link)</label>
+                      <input
+                        type="url"
+                        placeholder="https://my-chess.example.com"
+                        value={myUrl}
+                        onChange={e => setMyUrl(e.target.value)}
+                        className="w-full p-2 text-sm border rounded-md bg-[var(--bg-color)] border-[var(--border-color)] text-[var(--text-color)]"
                       />
                     </div>
                     <button type="submit" className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded">

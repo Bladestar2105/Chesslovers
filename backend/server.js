@@ -90,14 +90,14 @@ app.post('/api/admin/federation/code', authenticateAdmin, (req, res) => {
 });
 
 app.post('/api/admin/federation/link', authenticateAdmin, async (req, res) => {
-  const { partnerUrl, exchangeCode } = req.body;
+  const { partnerUrl, exchangeCode, myUrl } = req.body;
   try {
     // Basic verification of partner instance and code
     // In a real implementation this would verify cryptographically
     const response = await fetch(`${partnerUrl}/api/federation/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: exchangeCode, instanceId: db.instanceId })
+      body: JSON.stringify({ code: exchangeCode, instanceId: db.instanceId, initiatorUrl: myUrl })
     });
 
     if (response.ok) {
@@ -113,12 +113,15 @@ app.post('/api/admin/federation/link', authenticateAdmin, async (req, res) => {
 });
 
 app.post('/api/federation/verify', (req, res) => {
-  const { code, instanceId } = req.body;
+  const { code, instanceId, initiatorUrl } = req.body;
   if (federationExchangeCodes.has(code)) {
     // Code valid
     federationExchangeCodes.delete(code); // One time use
-    // If we wanted 2-way link, we could save the partner here too,
-    // but the partnerUrl isn't provided in this simple flow unless passed.
+
+    if (initiatorUrl) {
+      db.saveFederationLink(instanceId, initiatorUrl);
+    }
+
     res.json({ success: true, partnerInstanceId: db.instanceId });
   } else {
     res.status(400).json({ error: 'Invalid or expired exchange code' });
