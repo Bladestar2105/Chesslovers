@@ -18,6 +18,7 @@ function Game({ socket, sessionId }) {
   const [moveHistory, setMoveHistory] = useState([]);
   const [gameResult, setGameResult] = useState(null);
   const [isInCheck, setIsInCheck] = useState(false);
+  const [illegalMoveCount, setIllegalMoveCount] = useState(0);
 
   // Timer state
   const [whiteTime, setWhiteTime] = useState(null);
@@ -112,9 +113,11 @@ function Game({ socket, sessionId }) {
     };
 
     const onDrawOffered = () => {
-      if (window.confirm(t('Opponent offered a draw. Accept?'))) {
-        socket.emit('accept_draw', { gameId: id });
-      }
+      setTimeout(() => {
+        if (window.confirm(t('Opponent offered a draw. Accept?'))) {
+          socket.emit('accept_draw', { gameId: id });
+        }
+      }, 100);
     };
 
     const onError = (error) => {
@@ -183,11 +186,20 @@ function Game({ socket, sessionId }) {
       if (result) {
         setFen(chess.fen());
         setIsInCheck(chess.isCheck());
+        setIllegalMoveCount(0);
         socket.emit('make_move', { gameId: id, move: result, sessionId });
         return true;
       }
     } catch (e) {
       console.error("Move error:", e.message);
+      setIllegalMoveCount(prev => {
+        const nextCount = prev + 1;
+        if (nextCount >= 2) {
+          alert(t('Illegal move'));
+          return 0; // reset after showing message
+        }
+        return nextCount;
+      });
       return false;
     }
     return false;
