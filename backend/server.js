@@ -8,6 +8,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
+const pkg = require('./package.json');
 
 const app = express();
 app.use(cors());
@@ -23,11 +24,13 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_chess_key';
+const VERSION = pkg.version;
 
 // In-memory game state
 const activeGames = new Map();
 let matchmakingQueue = [];
 let federationExchangeCodes = new Map();
+const federationStatus = new Map(); // id -> { isActive: boolean, version: string, lastSeen: number }
 
 // Admin Auth Middleware
 const authenticateAdmin = (req, res, next) => {
@@ -58,9 +61,20 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 app.get('/api/admin/info', authenticateAdmin, (req, res) => {
+  const links = db.getFederationLinks().map(link => {
+    const status = federationStatus.get(link.id) || { isActive: false, version: 'unknown', lastSeen: null };
+    return {
+      ...link,
+      isActive: status.isActive,
+      version: status.version,
+      lastSeen: status.lastSeen
+    };
+  });
+
   res.json({
     instanceId: db.instanceId,
-    links: db.getFederationLinks()
+    version: VERSION,
+    links
   });
 });
 
@@ -80,6 +94,12 @@ app.delete('/api/admin/replays/:id', authenticateAdmin, (req, res) => {
 
 app.delete('/api/admin/replays', authenticateAdmin, (req, res) => {
   db.deleteAllReplays();
+  res.json({ success: true });
+});
+
+app.delete('/api/admin/federation/link/:id', authenticateAdmin, (req, res) => {
+  db.deleteFederationLink(req.params.id);
+  federationStatus.delete(req.params.id);
   res.json({ success: true });
 });
 
@@ -136,8 +156,49 @@ app.post('/api/admin/federation/sync', authenticateAdmin, async (req, res) => {
 });
 
 app.get('/api/info', (req, res) => {
-  res.json({ instanceId: db.instanceId });
+  res.json({ instanceId: db.instanceId, version: VERSION });
 });
+
+// Heartbeat interval to check federation partners
+setInterval(async () => {
+  const links = db.getFederationLinks();
+  for (const link of links) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+      const response = await fetch(`${link.partner_url}/api/info`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        // Verify they are who they say they are
+        if (data.instanceId === link.id) {
+          federationStatus.set(link.id, {
+            isActive: true,
+            version: data.version,
+            lastSeen: Date.now()
+          });
+        } else {
+          // ID mismatch! Mark offline.
+          federationStatus.set(link.id, {
+            isActive: false,
+            version: 'id_mismatch',
+            lastSeen: federationStatus.get(link.id)?.lastSeen || null
+          });
+        }
+      } else {
+        throw new Error('Not OK');
+      }
+    } catch (e) {
+      federationStatus.set(link.id, {
+        isActive: false,
+        version: federationStatus.get(link.id)?.version || 'unknown',
+        lastSeen: federationStatus.get(link.id)?.lastSeen || null
+      });
+    }
+  }
+}, 10000); // Check every 10 seconds
 
 app.get('/api/replays', (req, res) => {
   const games = db.getFinishedGames();
@@ -497,128 +558,134 @@ io.on('connection', (socket) => {
   });
 
   socket.on('find_random', async ({ timeControl, sessionId, playerName }) => {
-    // Basic local matchmaking
-    const opponent = matchmakingQueue.find(p => p.timeControl === timeControl && p.sessionId !== sessionId);
-    if (opponent) {
-      // Remove from queue
-      matchmakingQueue = matchmakingQueue.filter(p => p.socketId !== opponent.socketId);
+    // Gather all possible targets: local queue + active, compatible federation links
+    const targets = ['local'];
+    const links = db.getFederationLinks();
 
-      const gameId = uuidv4();
-      const chess = new Chess();
-      const tc = parseTimeControl(timeControl);
-      const time = tc.base;
-      const gameData = {
-        id: gameId,
-        chess,
-        white: opponent.sessionId,
-        whiteName: opponent.playerName,
-        black: sessionId,
-        blackName: playerName,
-        isCpu: false,
-        timeControl,
-        status: 'active',
-        whiteTime: time,
-        blackTime: time,
-        lastMoveTime: null
-      };
-      activeGames.set(gameId, gameData);
-
-      // Notify both
-      io.to(opponent.socketId).emit('game_started', { gameId, side: 'w' });
-      socket.emit('game_started', { gameId, side: 'b' });
-
-      // Join rooms
-      socket.join(gameId);
-      io.sockets.sockets.get(opponent.socketId)?.join(gameId);
-
-      db.saveGame({
-        id: gameData.id,
-        pgn: gameData.chess.pgn(),
-        status: gameData.status,
-        timeControl: gameData.timeControl,
-        white: gameData.white,
-        black: gameData.black,
-        isCpu: false
-      });
-      return;
+    for (const link of links) {
+      const status = federationStatus.get(link.id);
+      // Ensure the partner is online and on the same version
+      if (status && status.isActive && status.version === VERSION) {
+        targets.push(link);
+      }
     }
 
-    // If no local match, check federated partners
-    const links = db.getFederationLinks();
-    if (links.length > 0) {
-      try {
-        const fetchPromises = links.map(link => {
+    // Fisher-Yates Shuffle to randomize the order of targets
+    for (let i = targets.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [targets[i], targets[j]] = [targets[j], targets[i]];
+    }
+
+    for (const target of targets) {
+      if (target === 'local') {
+        const opponent = matchmakingQueue.find(p => p.timeControl === timeControl && p.sessionId !== sessionId);
+        if (opponent) {
+          // Remove from queue
+          matchmakingQueue = matchmakingQueue.filter(p => p.socketId !== opponent.socketId);
+
+          const gameId = uuidv4();
+          const chess = new Chess();
+          const tc = parseTimeControl(timeControl);
+          const time = tc.base;
+          const gameData = {
+            id: gameId,
+            chess,
+            white: opponent.sessionId,
+            whiteName: opponent.playerName,
+            black: sessionId,
+            blackName: playerName,
+            isCpu: false,
+            timeControl,
+            status: 'active',
+            whiteTime: time,
+            blackTime: time,
+            lastMoveTime: null
+          };
+          activeGames.set(gameId, gameData);
+
+          // Notify both
+          io.to(opponent.socketId).emit('game_started', { gameId, side: 'w' });
+          socket.emit('game_started', { gameId, side: 'b' });
+
+          // Join rooms
+          socket.join(gameId);
+          io.sockets.sockets.get(opponent.socketId)?.join(gameId);
+
+          db.saveGame({
+            id: gameData.id,
+            pgn: gameData.chess.pgn(),
+            status: gameData.status,
+            timeControl: gameData.timeControl,
+            white: gameData.white,
+            black: gameData.black,
+            isCpu: false
+          });
+          return; // Match found and started, exit completely
+        }
+      } else {
+        // Target is a federation link
+        try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 2000);
 
-          return fetch(`${link.partner_url}/api/federation/matchmaking`, {
+          const response = await fetch(`${target.partner_url}/api/federation/matchmaking`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ timeControl, sessionId, playerName, initiatorInstanceId: db.instanceId }),
             signal: controller.signal
-          })
-          .then(async response => {
-            clearTimeout(timeoutId);
-            if (!response.ok) throw new Error(`Partner error: ${response.status}`);
+          });
+
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
             const data = await response.json();
-            if (!data.matchFound) throw new Error('No match on partner');
-            return { link, data };
-          })
-          .catch(err => {
-            clearTimeout(timeoutId);
-            throw err;
-          });
-        });
+            if (data.matchFound) {
+              const partnerGameId = data.gameId;
+              const gameId = partnerGameId; // Use the exact same game ID locally
 
-        // Use Promise.any to get the first successful match quickly
-        const successfulMatch = await Promise.any(fetchPromises);
+              const chess = new Chess();
 
-        if (successfulMatch && successfulMatch.data.matchFound) {
-          const partnerGameId = successfulMatch.data.gameId;
-          const gameId = partnerGameId; // Use the exact same game ID locally
+              const gameData = {
+                 id: gameId,
+                 chess,
+                 white: data.gameData.white,
+                 whiteName: data.gameData.whiteName,
+                 black: data.gameData.black,
+                 blackName: data.gameData.blackName,
+                 isCpu: false,
+                 timeControl: data.gameData.timeControl,
+                 status: 'active',
+                 whiteTime: data.gameData.whiteTime,
+                 blackTime: data.gameData.blackTime,
+                 lastMoveTime: null,
+                 federationPartnerUrl: target.partner_url,
+                 federationPartnerId: target.id
+              };
 
-          const chess = new Chess();
+              activeGames.set(gameId, gameData);
+              socket.join(gameId);
 
-          const gameData = {
-             id: gameId,
-             chess,
-             white: successfulMatch.data.gameData.white,
-             whiteName: successfulMatch.data.gameData.whiteName,
-             black: successfulMatch.data.gameData.black,
-             blackName: successfulMatch.data.gameData.blackName,
-             isCpu: false,
-             timeControl: successfulMatch.data.gameData.timeControl,
-             status: 'active',
-             whiteTime: successfulMatch.data.gameData.whiteTime,
-             blackTime: successfulMatch.data.gameData.blackTime,
-             lastMoveTime: null,
-             federationPartnerUrl: successfulMatch.link.partner_url,
-             federationPartnerId: successfulMatch.link.id
-          };
+              db.saveGame({
+                 id: gameData.id,
+                 pgn: gameData.chess.pgn(),
+                 status: gameData.status,
+                 timeControl: gameData.timeControl,
+                 white: gameData.white,
+                 black: gameData.black,
+                 isCpu: false
+              });
 
-          activeGames.set(gameId, gameData);
-          socket.join(gameId);
-
-          db.saveGame({
-             id: gameData.id,
-             pgn: gameData.chess.pgn(),
-             status: gameData.status,
-             timeControl: gameData.timeControl,
-             white: gameData.white,
-             black: gameData.black,
-             isCpu: false
-          });
-
-          socket.emit('game_started', { gameId, side: 'b' });
-          return;
+              socket.emit('game_started', { gameId, side: 'b' });
+              return; // Match found and started, exit completely
+            }
+          }
+        } catch (e) {
+          console.error(`Failed to check matchmaking with ${target.partner_url}`, e.message);
         }
-      } catch (e) {
-        // AggregateError means no partner found a match or they all timed out/failed
-        console.log('No matches found across federation partners');
       }
     }
 
-    // Still no match, wait locally
+    // Still no match across ANY target, wait locally
     matchmakingQueue.push({ socketId: socket.id, sessionId, timeControl, playerName });
     socket.emit('waiting_for_opponent');
   });

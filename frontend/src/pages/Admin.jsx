@@ -145,6 +145,19 @@ function Admin() {
     }
   };
 
+  const handleDeleteLink = async (id) => {
+    if (!window.confirm('Remove this partner?')) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/federation/link/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders
+      });
+      if (res.ok) fetchInfo();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleSync = async () => {
     try {
       const res = await fetch(`${API_URL}/api/admin/federation/sync`, {
@@ -284,13 +297,47 @@ function Admin() {
       {activeTab === 'federation' && (
         <div className="space-y-6">
           <div>
-             <h3 className="font-bold text-lg border-b border-[var(--border-color)] pb-2 mb-2">Federation Links</h3>
+             <div className="flex justify-between items-center border-b border-[var(--border-color)] pb-2 mb-2">
+               <h3 className="font-bold text-lg">Federation Links</h3>
+               <span className="text-sm bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100 px-2 py-1 rounded font-bold">
+                 v{info?.version || '1.0.0'}
+               </span>
+             </div>
              {info?.links?.length > 0 ? (
-               <ul className="list-disc list-inside mb-4">
-                 {info.links.map(link => (
-                   <li key={link.id}>{link.partner_url} <span className="text-gray-500 text-sm">({link.id})</span></li>
-                 ))}
-               </ul>
+               <div className="overflow-x-auto mb-4">
+                 <table className="w-full text-left border-collapse">
+                   <thead>
+                     <tr className="border-b border-[var(--border-color)] text-sm">
+                       <th className="p-2">URL</th>
+                       <th className="p-2">ID</th>
+                       <th className="p-2 text-center">Status</th>
+                       <th className="p-2 text-center">Version</th>
+                       <th className="p-2 text-center">Actions</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {info.links.map(link => (
+                       <tr key={link.id} className="border-b border-[var(--border-color)] hover:bg-black/5 dark:hover:bg-white/5 text-sm">
+                         <td className="p-2 font-mono">{link.partner_url}</td>
+                         <td className="p-2 truncate max-w-[150px]" title={link.id}>{link.id}</td>
+                         <td className="p-2 text-center">
+                           {link.isActive ? (
+                             <span className="text-green-600 font-bold">Online</span>
+                           ) : (
+                             <span className="text-red-600 font-bold">Offline</span>
+                           )}
+                         </td>
+                         <td className="p-2 text-center">{link.version || '?'}</td>
+                         <td className="p-2 text-center">
+                           <button onClick={() => handleDeleteLink(link.id)} className="text-red-500 hover:text-red-700 font-semibold">
+                             Remove
+                           </button>
+                         </td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
              ) : (
                <p className="text-gray-500 mb-4">No partner instances connected.</p>
              )}
