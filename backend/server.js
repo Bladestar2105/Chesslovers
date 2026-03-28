@@ -735,7 +735,7 @@ io.on('connection', (socket) => {
 
     if (game.white === sessionId || game.black === sessionId) {
         game.status = 'resign';
-        const winner = game.white === sessionId ? 'black' : 'white';
+        const winner = game.white === sessionId ? 'b' : 'w';
         io.to(gameId).emit('game_over', { reason: 'resign', winner });
         saveAndRemoveGame(game);
 
@@ -776,15 +776,15 @@ io.on('connection', (socket) => {
       if (turn === 'w' && game.whiteTime - elapsed <= 1) { // 1 second grace
           game.whiteTime = 0;
           game.status = 'timeout';
-          io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'black' });
+          io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'b' });
           saveAndRemoveGame(game);
-          sendFederationEvent(game, 'timeout', { winner: 'black' });
+          sendFederationEvent(game, 'timeout', { winner: 'b' });
       } else if (turn === 'b' && game.blackTime - elapsed <= 1) {
           game.blackTime = 0;
           game.status = 'timeout';
-          io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'white' });
+          io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'w' });
           saveAndRemoveGame(game);
-          sendFederationEvent(game, 'timeout', { winner: 'white' });
+          sendFederationEvent(game, 'timeout', { winner: 'w' });
       }
   });
 
@@ -828,15 +828,15 @@ setInterval(() => {
         if (turn === 'w' && game.whiteTime - elapsed <= 0) {
             game.whiteTime = 0;
             game.status = 'timeout';
-            io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'black' });
+            io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'b' });
             saveAndRemoveGame(game);
-            sendFederationEvent(game, 'timeout', { winner: 'black' });
+            sendFederationEvent(game, 'timeout', { winner: 'b' });
         } else if (turn === 'b' && game.blackTime - elapsed <= 0) {
             game.blackTime = 0;
             game.status = 'timeout';
-            io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'white' });
+            io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'w' });
             saveAndRemoveGame(game);
-            sendFederationEvent(game, 'timeout', { winner: 'white' });
+            sendFederationEvent(game, 'timeout', { winner: 'w' });
         }
     }
 }, 1000);

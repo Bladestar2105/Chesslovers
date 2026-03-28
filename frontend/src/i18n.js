@@ -1,5 +1,6 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import LanguageDetector from 'i18next-browser-languagedetector';
 
 const resources = {
   en: {
@@ -45,7 +46,8 @@ const resources = {
       "No moves yet": "No moves yet",
       "Finished Games": "Finished Games",
       "Replay Viewer": "Replay Viewer",
-      "Back to list": "Back to list"
+      "Back to list": "Back to list",
+      "Illegal move": "Illegal move"
     }
   },
   de: {
@@ -91,16 +93,17 @@ const resources = {
       "No moves yet": "Noch keine Züge",
       "Finished Games": "Beendete Spiele",
       "Replay Viewer": "Spielanzeige",
-      "Back to list": "Zurück zur Liste"
+      "Back to list": "Zurück zur Liste",
+      "Illegal move": "Illegaler Zug"
     }
   }
 };
 
 i18n
+  .use(LanguageDetector)
   .use(initReactI18next)
   .init({
     resources,
-    lng: "en",
     fallbackLng: "en",
     interpolation: {
       escapeValue: false
