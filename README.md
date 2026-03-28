@@ -10,7 +10,7 @@ A modern, registration-free multiplayer chess platform designed for instant play
 - **Multi-Language Support**: i18n support for English and German out of the box.
 - **Light & Dark Mode**: A seamless theming system that adapts to your preferences.
 - **Admin Dashboard**: Manage your instance, view replays, and handle federated partner instances via `/admin` (JWT authenticated).
-- **Federation Ready (WIP)**: Built with server federation in mind to pool players across different hosted instances.
+- **Federation Ready**: Built with server federation to pool players across different hosted instances.
 
 ---
 
@@ -109,11 +109,29 @@ npx playwright test
 
 ---
 
+## 🤝 Server Federation
+
+Server Federation allows admins to connect multiple hosted instances to share matchmaking pools. Players can seamlessly play against opponents on other servers without being redirected to a different URL.
+
+### How to Set Up Federation
+
+1. Open the Admin UI (`/admin`) and log in.
+2. Obtain your instance's unique Instance ID and URL.
+3. Exchange your Instance ID and URL with a partner instance's admin.
+4. Mutually and manually input each other's partner URL and Instance ID in the Admin UI.
+
+### How it Works
+
+- **Health and Compatibility**: Instances monitor each other via a periodic heartbeat polling the `/api/info` endpoints, ensuring active status and version compatibility.
+- **Matchmaking**: Random matchmaking (`find_random`) groups the local queue with all active, version-compatible federation partners into a single shuffled list for unbiased pairing.
+- **Real-Time Sync**: Game events and replays are synchronized via backend-to-backend API calls (e.g., `/api/federation/sync-event`), keeping players on their preferred instance's URL.
+
+---
+
 ## 🗺️ Roadmap & Future Enhancements
 
 Check out `TODO.md` for our full roadmap. Upcoming features include:
 - **Mobile Companion App**: A native app for iOS and Android to easily connect to your preferred instances.
-- **Server Federation (Instance Pooling)**: Connect multiple self-hosted instances together to share matchmaking pools, allowing users across different servers to play against each other seamlessly.
 
 ---
 
