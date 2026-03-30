@@ -18,6 +18,17 @@ function Admin() {
   const [newPassword, setNewPassword] = useState('');
   const [passwordMessage, setPasswordMessage] = useState('');
 
+  const handleError = (err, customMessage) => {
+    console.error(err);
+    if (customMessage) {
+      if (typeof customMessage === 'function') {
+        customMessage(t('Connection error'));
+      } else {
+        alert(t('Connection error'));
+      }
+    }
+  };
+
   useEffect(() => {
     if (token) {
       fetchInfo();
@@ -47,7 +58,7 @@ function Admin() {
         setError(data.error || 'Login failed');
       }
     } catch (err) {
-      setError('Connection error');
+      handleError(err, setError);
     }
   };
 
@@ -63,7 +74,7 @@ function Admin() {
       if (res.ok) setInfo(await res.json());
       else if (res.status === 401 || res.status === 403) handleLogout();
     } catch (e) {
-      console.error(e);
+      handleError(e);
     }
   };
 
@@ -72,7 +83,7 @@ function Admin() {
       const res = await fetch(`${API_URL}/api/replays`);
       if (res.ok) setReplays(await res.json());
     } catch (e) {
-      console.error(e);
+      handleError(e);
     }
   };
 
@@ -85,7 +96,7 @@ function Admin() {
       });
       if (res.ok) fetchReplays();
     } catch (e) {
-      console.error(e);
+      handleError(e);
     }
   };
 
@@ -98,7 +109,7 @@ function Admin() {
       });
       if (res.ok) fetchReplays();
     } catch (e) {
-      console.error(e);
+      handleError(e);
     }
   };
 
@@ -120,7 +131,7 @@ function Admin() {
         alert(data.error || 'Failed to link');
       }
     } catch (e) {
-      alert('Connection error');
+      handleError(e, true);
     }
   };
 
@@ -141,7 +152,7 @@ function Admin() {
         setPasswordMessage(data.error || 'Failed to update password.');
       }
     } catch (err) {
-      setPasswordMessage('Connection error.');
+      handleError(err, setPasswordMessage);
     }
   };
 
@@ -154,7 +165,7 @@ function Admin() {
       });
       if (res.ok) fetchInfo();
     } catch (e) {
-      console.error(e);
+      handleError(e);
     }
   };
 
@@ -172,7 +183,7 @@ function Admin() {
         alert('Failed to sync');
       }
     } catch (e) {
-      alert('Connection error');
+      handleError(e, true);
     }
   };
 

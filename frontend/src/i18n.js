@@ -47,7 +47,8 @@ const resources = {
       "Finished Games": "Finished Games",
       "Replay Viewer": "Replay Viewer",
       "Back to list": "Back to list",
-      "Illegal move": "Illegal move"
+      "Illegal move": "Illegal move",
+      "Connection error": "Connection error"
     }
   },
   de: {
@@ -94,7 +95,8 @@ const resources = {
       "Finished Games": "Beendete Spiele",
       "Replay Viewer": "Spielanzeige",
       "Back to list": "Zurück zur Liste",
-      "Illegal move": "Illegaler Zug"
+      "Illegal move": "Illegaler Zug",
+      "Connection error": "Verbindungsfehler"
     }
   }
 };
