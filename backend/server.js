@@ -9,6 +9,7 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
 const pkg = require('./package.json');
+const { parseTimeControl } = require('./utils');
 
 const app = express();
 app.use(cors());
@@ -361,12 +362,6 @@ app.get(/^(?!\/api).+/, (req, res) => {
 // Helper for sending stockfish command
 const sendStockfishCmd = (engine, cmd) => {
   engine.postMessage(cmd);
-};
-
-const parseTimeControl = (tc) => {
-  if (tc === 'unlimited') return { base: null, inc: null };
-  const parts = tc.split('|');
-  return { base: parseInt(parts[0]) * 60, inc: parseInt(parts[1]) };
 };
 
 io.on('connection', (socket) => {
