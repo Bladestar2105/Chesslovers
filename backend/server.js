@@ -121,9 +121,9 @@ app.post('/api/admin/federation/link', authenticateAdmin, async (req, res) => {
 
 app.post('/api/admin/federation/sync', authenticateAdmin, async (req, res) => {
   const links = db.getFederationLinks();
-  let syncCount = 0;
 
-  for (const link of links) {
+  const results = await Promise.all(links.map(async (link) => {
+    let localSyncCount = 0;
     try {
       // Fetch replays from partner
       const response = await fetch(`${link.partner_url}/api/replays`);
@@ -143,16 +143,18 @@ app.post('/api/admin/federation/sync', authenticateAdmin, async (req, res) => {
               isCpu: game.is_cpu === 1,
               cpuLevel: game.cpu_level
             });
-            syncCount++;
+            localSyncCount++;
           }
         }
       }
     } catch (e) {
       console.error(`Failed to sync with ${link.partner_url}`, e);
     }
-  }
+    return localSyncCount;
+  }));
 
-  res.json({ success: true, synced: syncCount });
+  const totalSyncCount = results.reduce((acc, count) => acc + count, 0);
+  res.json({ success: true, synced: totalSyncCount });
 });
 
 app.get('/api/info', (req, res) => {
@@ -162,7 +164,7 @@ app.get('/api/info', (req, res) => {
 // Heartbeat interval to check federation partners
 setInterval(async () => {
   const links = db.getFederationLinks();
-  for (const link of links) {
+  await Promise.all(links.map(async (link) => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -197,7 +199,7 @@ setInterval(async () => {
         lastSeen: federationStatus.get(link.id)?.lastSeen || null
       });
     }
-  }
+  }));
 }, 10000); // Check every 10 seconds
 
 app.get('/api/replays', (req, res) => {
