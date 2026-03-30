@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const crypto = require('crypto');
 
 const dataDir = path.join(__dirname, 'data');
 const fs = require('fs');
@@ -50,8 +51,8 @@ const instanceId = instanceIdRow.value;
 // Get or generate Admin Password
 let adminPasswordRow = db.prepare('SELECT value FROM config WHERE key = ?').get('admin_password');
 if (!adminPasswordRow) {
-  // Generate a random 12 character password
-  const newAdminPassword = Math.random().toString(36).slice(2, 14).padEnd(12, '0');
+  // Generate a random 12 character password (base64 of 9 bytes is exactly 12 chars)
+  const newAdminPassword = crypto.randomBytes(9).toString('base64').replace(/\+/g, '8').replace(/\//g, '9');
   db.prepare('INSERT INTO config (key, value) VALUES (?, ?)').run('admin_password', newAdminPassword);
   adminPasswordRow = { value: newAdminPassword };
 }
