@@ -1,12 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import { Chessboard, ChessboardDnDProvider } from 'react-chessboard';
 import { Chess } from 'chess.js';
 import { useTranslation } from 'react-i18next';
 
 function Game({ socket, sessionId }) {
   const { id } = useParams();
-  const navigate = useNavigate();
   const { t } = useTranslation();
 
   const [chess] = useState(new Chess());
@@ -18,7 +17,7 @@ function Game({ socket, sessionId }) {
   const [moveHistory, setMoveHistory] = useState([]);
   const [gameResult, setGameResult] = useState(null);
   const [isInCheck, setIsInCheck] = useState(false);
-  const [illegalMoveCount, setIllegalMoveCount] = useState(0);
+  const [, setIllegalMoveCount] = useState(0);
 
   // Timer state
   const [whiteTime, setWhiteTime] = useState(null);
@@ -280,8 +279,10 @@ function Game({ socket, sessionId }) {
   const oppTime = side === 'w' ? blackTime : whiteTime;
 
   // Get custom square styles for check highlight
-  const getCustomSquareStyles = useCallback(() => {
-    if (isInCheck && status === 'active') {
+  const customSquareStyles = useMemo(() => {
+    // using 'fen' here to trigger recalculation, since 'chess' object instance is mutated
+    const currentFen = fen;
+    if (currentFen && isInCheck && status === 'active') {
       const turn = chess.turn();
       const kingSquare = chess.board().flat().find(p => p && p.type === 'k' && p.color === turn);
       if (kingSquare) {
@@ -294,10 +295,10 @@ function Game({ socket, sessionId }) {
       }
     }
     return {};
-  }, [isInCheck, chess, status]);
+  }, [isInCheck, fen, status, chess]);
 
   // Format move for display
-  const formatMoves = () => {
+  const formattedMoves = useMemo(() => {
     const pairs = [];
     for (let i = 0; i < moveHistory.length; i += 2) {
       const moveNum = Math.floor(i / 2) + 1;
@@ -306,7 +307,7 @@ function Game({ socket, sessionId }) {
       pairs.push({ moveNum, whiteMove, blackMove });
     }
     return pairs;
-  };
+  }, [moveHistory]);
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 items-center lg:items-start justify-center">
@@ -356,7 +357,7 @@ function Game({ socket, sessionId }) {
               boardOrientation={side === 'w' ? 'white' : 'black'}
               customDarkSquareStyle={{ backgroundColor: '#779556' }}
               customLightSquareStyle={{ backgroundColor: '#ebecd0' }}
-              customSquareStyles={getCustomSquareStyles()}
+              customSquareStyles={customSquareStyles}
             />
           </ChessboardDnDProvider>
         </div>
@@ -416,7 +417,7 @@ function Game({ socket, sessionId }) {
           ) : (
             <table className="w-full">
               <tbody>
-                {formatMoves().map(({ moveNum, whiteMove, blackMove }) => (
+                {formattedMoves.map(({ moveNum, whiteMove, blackMove }) => (
                   <tr key={moveNum} className="hover:bg-gray-100 dark:hover:bg-gray-800">
                     <td className="py-1 px-2 text-gray-500 w-8">{moveNum}.</td>
                     <td className="py-1 px-2">{whiteMove}</td>
