@@ -58,10 +58,21 @@ if (!adminPasswordRow) {
 }
 const adminPassword = adminPasswordRow.value;
 
+// Get or generate JWT Secret
+let jwtSecretRow = db.prepare('SELECT value FROM config WHERE key = ?').get('jwt_secret');
+if (!jwtSecretRow) {
+  const newJwtSecret = crypto.randomBytes(32).toString('hex');
+  db.prepare('INSERT INTO config (key, value) VALUES (?, ?)').run('jwt_secret', newJwtSecret);
+  jwtSecretRow = { value: newJwtSecret };
+}
+const jwtSecret = jwtSecretRow.value;
+
+
 module.exports = {
   db,
   instanceId,
   adminPassword,
+  jwtSecret,
   saveGame: (gameData) => {
     const stmt = db.prepare(`
       INSERT INTO games (id, pgn, status, time_control, white_player_id, black_player_id, is_cpu, cpu_level)
