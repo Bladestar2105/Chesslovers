@@ -92,10 +92,20 @@ function App() {
             <Link to="/admin" className="hover:underline">Admin</Link>
           </div>
           <div className="flex gap-4">
-            <button onClick={toggleLanguage} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700" title={t('Language')}>
+            <button
+              onClick={toggleLanguage}
+              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              title={t('Language')}
+              aria-label={t('Language')}
+            >
               <Globe size={20} />
             </button>
-            <button onClick={toggleTheme} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700" title={t('Theme')}>
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              title={t('Theme')}
+              aria-label={t('Theme')}
+            >
               {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
             </button>
           </div>
