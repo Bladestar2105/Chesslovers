@@ -5,6 +5,8 @@ const cors = require('cors');
 const { Chess } = require('chess.js');
 const { v4: uuidv4 } = require('uuid');
 const { spawn } = require('child_process');
+
+const crypto = require('crypto');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
@@ -24,7 +26,7 @@ const io = new Server(server, {
 });
 
 const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_chess_key';
+const JWT_SECRET = process.env.JWT_SECRET || db.jwtSecret;
 const VERSION = pkg.version;
 
 // In-memory game state
@@ -386,7 +388,7 @@ io.on('connection', (socket) => {
   socket.on('create_game', ({ isCpu, cpuLevel, timeControl, sessionId, customGameId, playerName }) => {
     // Generate an 8-character ID if it's a friend game and no customGameId was provided
     // This makes it easy to share. Keep uuid for cpu games or random if desired.
-    const gameId = customGameId ? customGameId : (isCpu ? uuidv4() : Math.random().toString(36).substring(2, 10));
+    const gameId = customGameId ? customGameId : (isCpu ? uuidv4() : crypto.randomBytes(4).toString('hex'));
     const chess = new Chess();
 
     const tc = parseTimeControl(timeControl);
