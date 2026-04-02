@@ -19,6 +19,7 @@ function Replays() {
       .then(res => res.json())
       .then(data => setGames(data))
       .catch(err => console.error("Error fetching replays:", err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const viewReplay = (pgn) => {

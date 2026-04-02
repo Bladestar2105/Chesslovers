@@ -44,7 +44,7 @@ function App() {
       sid = uuidv4();
       localStorage.setItem('chess_session_id', sid);
     }
-    setSessionId(sid);
+    setTimeout(() => setSessionId(sid), 0);
 
     // Apply theme
     document.documentElement.className = theme;
@@ -52,7 +52,7 @@ function App() {
 
     // Connect to server
     const newSocket = io(SOCKET_URL);
-    setSocket(newSocket);
+    setTimeout(() => setSocket(newSocket), 0);
 
     newSocket.on('connect', () => {
       newSocket.emit('rejoin', { sessionId: sid });
