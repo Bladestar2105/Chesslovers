@@ -29,11 +29,31 @@ function Admin() {
     }
   };
 
+  const fetchInfo = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/info`, { headers: authHeaders });
+      if (res.ok) setInfo(await res.json());
+      else if (res.status === 401 || res.status === 403) handleLogout();
+    } catch (e) {
+      handleError(e);
+    }
+  };
+
+  const fetchReplays = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/replays`);
+      if (res.ok) setReplays(await res.json());
+    } catch (e) {
+      handleError(e);
+    }
+  };
+
   useEffect(() => {
     if (token) {
       fetchInfo();
       fetchReplays();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   const authHeaders = {
@@ -68,24 +88,7 @@ function Admin() {
     setInfo(null);
   };
 
-  const fetchInfo = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/admin/info`, { headers: authHeaders });
-      if (res.ok) setInfo(await res.json());
-      else if (res.status === 401 || res.status === 403) handleLogout();
-    } catch (e) {
-      handleError(e);
-    }
-  };
 
-  const fetchReplays = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/replays`);
-      if (res.ok) setReplays(await res.json());
-    } catch (e) {
-      handleError(e);
-    }
-  };
 
   const handleDeleteReplay = async (id) => {
     if (!window.confirm('Delete this replay?')) return;
