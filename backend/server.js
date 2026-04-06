@@ -210,6 +210,16 @@ app.get('/api/replays', (req, res) => {
   res.json(games);
 });
 
+function emitMoveMade(game) {
+  io.to(game.id).emit('move_made', {
+    fen: game.chess.fen(),
+    pgn: game.chess.pgn(),
+    whiteTime: game.whiteTime,
+    blackTime: game.blackTime,
+    lastMoveTime: game.lastMoveTime
+  });
+}
+
 app.post('/api/federation/sync-event', (req, res) => {
   const { initiatorInstanceId, event, data } = req.body;
 
@@ -232,13 +242,7 @@ app.post('/api/federation/sync-event', (req, res) => {
         if (data.lastMoveTime !== undefined) game.lastMoveTime = data.lastMoveTime;
         else updateGameTime(game);
 
-        io.to(game.id).emit('move_made', {
-            fen: game.chess.fen(),
-            pgn: game.chess.pgn(),
-            whiteTime: game.whiteTime,
-            blackTime: game.blackTime,
-            lastMoveTime: game.lastMoveTime
-        });
+        emitMoveMade(game);
         checkGameEnd(game, true); // true = avoid sending back federation event
         saveToDb(game);
       }
@@ -438,13 +442,7 @@ io.on('connection', (socket) => {
                   };
                   gameData.chess.move(moveObj);
                   updateGameTime(gameData);
-                  io.to(gameId).emit('move_made', {
-                      fen: gameData.chess.fen(),
-                      pgn: gameData.chess.pgn(),
-                      whiteTime: gameData.whiteTime,
-                      blackTime: gameData.blackTime,
-                      lastMoveTime: gameData.lastMoveTime
-                  });
+                  emitMoveMade(gameData);
                   checkGameEnd(gameData);
                 } catch (err) {
                   console.error('CPU illegal move:', move, err);
@@ -703,13 +701,7 @@ io.on('connection', (socket) => {
       const result = game.chess.move(move);
       if (result) {
         updateGameTime(game);
-        io.to(gameId).emit('move_made', {
-            fen: game.chess.fen(),
-            pgn: game.chess.pgn(),
-            whiteTime: game.whiteTime,
-            blackTime: game.blackTime,
-            lastMoveTime: game.lastMoveTime
-        });
+        emitMoveMade(game);
         checkGameEnd(game);
         saveToDb(game);
 
