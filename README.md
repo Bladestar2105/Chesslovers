@@ -48,7 +48,6 @@ cd backend
 npm install
 node server.js
 ```
-*Note: On the first startup, a 12-character random admin password will be generated and printed to the console. Save this to access the Admin UI at `/admin`.*
 
 ### 3. Frontend Setup
 Open a new terminal window to start the Vite development server.
