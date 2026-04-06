@@ -11,7 +11,7 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
 const pkg = require('./package.json');
-const { parseTimeControl } = require('./utils');
+const { parseTimeControl, authenticateAdmin: createAuthenticateAdmin } = require('./utils');
 
 const app = express();
 app.use(cors());
@@ -35,23 +35,7 @@ let matchmakingQueue = [];
 let federationExchangeCodes = new Map();
 const federationStatus = new Map(); // id -> { isActive: boolean, version: string, lastSeen: number }
 
-// Admin Auth Middleware
-const authenticateAdmin = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Missing authorization header' });
-
-  const token = authHeader.split(' ')[1];
-  try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    if (payload.admin) {
-      next();
-    } else {
-      res.status(403).json({ error: 'Not an admin' });
-    }
-  } catch (err) {
-    res.status(401).json({ error: 'Invalid token' });
-  }
-};
+const authenticateAdmin = createAuthenticateAdmin(JWT_SECRET, jwt);
 
 app.post('/api/admin/login', (req, res) => {
   const { password } = req.body;
