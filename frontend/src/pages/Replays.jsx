@@ -12,6 +12,8 @@ function Replays() {
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [error, setError] = useState('');
+  const [pgnInput, setPgnInput] = useState('');
+  const [analysis, setAnalysis] = useState([]);
   const API_URL = import.meta.env.VITE_SOCKET_URL || '';
 
   useEffect(() => {
@@ -32,6 +34,7 @@ function Replays() {
         chess.loadPgn(pgn);
         const h = chess.history({ verbose: true });
         setHistory(h);
+        setAnalysis(analyzeReplay(pgn));
         chess.reset();
         setHistoryIndex(-1);
         setCurrentFen(chess.fen());
@@ -45,7 +48,59 @@ function Replays() {
       setHistory([]);
       setHistoryIndex(-1);
       setCurrentFen(chess.fen());
+      setAnalysis([]);
     }
+  };
+
+  const getMaterialScore = (tmpChess) => {
+    const values = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+    return tmpChess.board().flat().reduce((acc, piece) => {
+      if (!piece) return acc;
+      const value = values[piece.type] || 0;
+      return acc + (piece.color === 'w' ? value : -value);
+    }, 0);
+  };
+
+  const analyzeReplay = (pgn) => {
+    const tmp = new Chess();
+    tmp.reset();
+    const parsed = new Chess();
+    parsed.loadPgn(pgn);
+    const moves = parsed.history({ verbose: true });
+    const marks = [];
+    moves.forEach((m, idx) => {
+      const before = getMaterialScore(tmp);
+      tmp.move(m);
+      const after = getMaterialScore(tmp);
+      const swing = Math.abs(after - before);
+      let label = '';
+      if (swing >= 5) label = 'Blunder';
+      else if (swing >= 3) label = 'Mistake';
+      else if (swing >= 2) label = 'Inaccuracy';
+      marks.push({ idx, label });
+    });
+    return marks;
+  };
+
+  const importPgn = () => {
+    viewReplay(pgnInput);
+  };
+
+  const copyPgn = async () => {
+    if (!selectedPgn) return;
+    if (!navigator?.clipboard?.writeText) return;
+    await navigator.clipboard.writeText(selectedPgn);
+  };
+
+  const exportPgn = () => {
+    if (!selectedPgn) return;
+    const blob = new Blob([selectedPgn], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `replay-${Date.now()}.pgn`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const nextMove = () => {
@@ -76,10 +131,12 @@ function Replays() {
   };
 
   const goToEnd = () => {
-    while (historyIndex < history.length - 1) {
-      chess.move(history[historyIndex + 1]);
-      setHistoryIndex(prev => prev + 1);
+    if (history.length === 0) return;
+    chess.reset();
+    for (let i = 0; i < history.length; i += 1) {
+      chess.move(history[i]);
     }
+    setHistoryIndex(history.length - 1);
     setCurrentFen(chess.fen());
   };
 
@@ -114,6 +171,11 @@ function Replays() {
             </span>
           )}
         </div>
+        {historyIndex >= 0 && analysis[historyIndex]?.label && (
+          <div className="mb-3 px-3 py-1 rounded bg-yellow-100 dark:bg-yellow-900 font-semibold">
+            {analysis[historyIndex].label}
+          </div>
+        )}
         
         {/* Navigation buttons */}
         <div className="flex gap-2">
@@ -147,6 +209,10 @@ function Replays() {
           </button>
         </div>
         
+        <div className="flex gap-2 mt-6">
+          <button onClick={copyPgn} className="px-3 py-2 bg-slate-600 text-white rounded">{t('Copy PGN')}</button>
+          <button onClick={exportPgn} className="px-3 py-2 bg-slate-700 text-white rounded">{t('Export PGN')}</button>
+        </div>
         <button onClick={() => setSelectedPgn(null)} className="mt-8 text-blue-500 underline hover:text-blue-700">
           {t('Back to list')}
         </button>
@@ -157,6 +223,16 @@ function Replays() {
   return (
     <div className="max-w-4xl mx-auto panel p-6 rounded-lg shadow-md">
       <h1 className="text-3xl font-bold mb-6">{t('Finished Games')}</h1>
+      <div className="mb-6 p-4 border border-[var(--border-color)] rounded">
+        <h3 className="font-semibold mb-2">{t('Import PGN')}</h3>
+        <textarea
+          value={pgnInput}
+          onChange={(e) => setPgnInput(e.target.value)}
+          className="w-full min-h-32 p-2 border rounded bg-[var(--panel-bg)]"
+          placeholder="1. e4 e5 2. Nf3 ..."
+        />
+        <button onClick={importPgn} className="mt-2 px-4 py-2 bg-green-600 text-white rounded">{t('View')}</button>
+      </div>
       {games.length === 0 ? (
         <p className="text-gray-500">No replays available yet.</p>
       ) : (

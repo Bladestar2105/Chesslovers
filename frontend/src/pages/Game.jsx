@@ -4,7 +4,7 @@ import { Chessboard, ChessboardDnDProvider } from 'react-chessboard';
 import { Chess } from 'chess.js';
 import { useTranslation } from 'react-i18next';
 
-function Game({ socket, sessionId }) {
+function Game({ socket, sessionId, deviceId }) {
   const { id } = useParams();
   const { t } = useTranslation();
 
@@ -26,6 +26,16 @@ function Game({ socket, sessionId }) {
   const [timeControl, setTimeControl] = useState('unlimited');
   const [whiteName, setWhiteName] = useState('');
   const [blackName, setBlackName] = useState('');
+  const [learningMode, setLearningMode] = useState(false);
+  const [hintMove, setHintMove] = useState('');
+  const [rematchPending, setRematchPending] = useState(false);
+  const [seriesState, setSeriesState] = useState(null);
+
+  const normalizeWinner = useCallback((winnerValue) => {
+    if (winnerValue === 'white') return 'w';
+    if (winnerValue === 'black') return 'b';
+    return winnerValue;
+  }, []);
 
   // Promotion Dialog State
   const [showPromotionDialog, setShowPromotionDialog] = useState(false);
@@ -38,7 +48,7 @@ function Game({ socket, sessionId }) {
     if (!socket) return;
 
     const playerName = localStorage.getItem('playerName') || '';
-    socket.emit('join_game', { gameId: id, sessionId, playerName });
+    socket.emit('join_game', { gameId: id, sessionId, playerName, playerKey: deviceId });
 
     const onGameJoined = (data) => {
       setSide(data.side);
@@ -53,6 +63,8 @@ function Game({ socket, sessionId }) {
       setWhiteTime(data.whiteTime);
       setBlackTime(data.blackTime);
       setLastMoveTime(data.lastMoveTime);
+      setLearningMode(Boolean(data.learningMode));
+      setSeriesState(data.seriesState || null);
       if (data.whiteName) setWhiteName(data.whiteName);
       if (data.blackName) setBlackName(data.blackName);
       setWaitingForOpponent(data.isCpu ? false : (data.side === 'w' && !data.lastMoveTime && data.timeControl !== 'unlimited'));
@@ -88,17 +100,18 @@ function Game({ socket, sessionId }) {
     };
 
     const onGameOver = ({ reason, winner }) => {
+      const normalizedWinner = normalizeWinner(winner);
       setStatus(reason);
-      setGameResult({ reason, winner });
+      setGameResult({ reason, winner: normalizedWinner });
       setIsInCheck(false);
       
       let message = '';
       if (reason === 'resign') {
-        message = winner === side ? t('You won! Opponent resigned.') : t('You lost. You resigned.');
+        message = normalizedWinner === side ? t('You won! Opponent resigned.') : t('You lost. You resigned.');
       } else if (reason === 'timeout') {
-        message = winner === side ? t('You won on time!') : t('You lost on time.');
+        message = normalizedWinner === side ? t('You won on time!') : t('You lost on time.');
       } else if (reason === 'mate') {
-        message = winner === side ? t('Checkmate! You won!') : t('Checkmate! You lost.');
+        message = normalizedWinner === side ? t('Checkmate! You won!') : t('Checkmate! You lost.');
       } else if (reason === 'stalemate') {
         message = t('Stalemate! Draw.');
       } else if (reason === 'draw') {
@@ -123,12 +136,22 @@ function Game({ socket, sessionId }) {
       console.error('Socket error:', error);
     };
 
+    const onRematchStarted = ({ gameId: newGameId }) => {
+      window.location.href = `/game/${newGameId}`;
+    };
+
+    const onRematchWaiting = () => {
+      setRematchPending(true);
+    };
+
     socket.on('game_joined', onGameJoined);
     socket.on('player_joined', onPlayerJoined);
     socket.on('move_made', onMoveMade);
     socket.on('game_over', onGameOver);
     socket.on('draw_offered', onDrawOffered);
     socket.on('error', onError);
+    socket.on('rematch_started', onRematchStarted);
+    socket.on('rematch_waiting', onRematchWaiting);
 
     return () => {
       socket.off('game_joined', onGameJoined);
@@ -137,8 +160,10 @@ function Game({ socket, sessionId }) {
       socket.off('game_over', onGameOver);
       socket.off('draw_offered', onDrawOffered);
       socket.off('error', onError);
+      socket.off('rematch_started', onRematchStarted);
+      socket.off('rematch_waiting', onRematchWaiting);
     };
-  }, [socket, id, sessionId, chess, side, t]);
+  }, [socket, id, sessionId, chess, side, t, deviceId, normalizeWinner]);
 
   // Auto-scroll move history
   useEffect(() => {
@@ -237,6 +262,33 @@ function Game({ socket, sessionId }) {
   const handleDrawOffer = () => {
     socket.emit('offer_draw', { gameId: id, sessionId });
     alert(t('Draw offer sent.'));
+  };
+
+  const handleRematch = () => {
+    setRematchPending(true);
+    socket.emit('request_rematch', { gameId: id, sessionId, playerKey: deviceId });
+  };
+
+  const handleHint = async () => {
+    try {
+      const apiUrl = import.meta.env.VITE_SOCKET_URL || '';
+      const res = await fetch(`${apiUrl}/api/analyze/hint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fen, level: 3 })
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.bestmove) {
+        setHintMove(`${data.bestmove.slice(0, 2)} → ${data.bestmove.slice(2, 4)}`);
+      }
+    } catch (err) {
+      console.error('Hint failed', err);
+    }
+  };
+
+  const handleTakeback = () => {
+    socket.emit('request_takeback', { gameId: id, sessionId });
   };
 
   // Timer effect
@@ -348,6 +400,11 @@ function Game({ socket, sessionId }) {
             {gameResult.reason === 'timeout' && (gameResult.winner === side ? t('Opponent ran out of time. You win!') : t('You ran out of time.'))}
           </div>
         )}
+        {seriesState && (
+          <div className="w-full max-w-lg p-2 text-center rounded bg-blue-100 dark:bg-blue-900">
+            {t('Best of 3')}: {Object.entries(seriesState.score || {}).map(([key, score]) => `${key.slice(0, 6)}… ${score}`).join(' | ')}
+          </div>
+        )}
 
         <div className="w-full max-w-lg shadow-2xl rounded-sm overflow-hidden border border-[var(--border-color)]">
           <ChessboardDnDProvider>
@@ -397,6 +454,36 @@ function Game({ socket, sessionId }) {
             {t('Offer Draw')}
           </button>
         </div>
+        {status !== 'active' && !isCpu && (
+          <button
+            onClick={handleRematch}
+            disabled={rematchPending}
+            className="w-full max-w-lg py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded disabled:opacity-50"
+          >
+            {rematchPending ? t('Requesting rematch...') : t('Rematch')}
+          </button>
+        )}
+        {isCpu && learningMode && (
+          <div className="w-full max-w-lg flex gap-3 mt-2">
+            <button
+              onClick={handleHint}
+              className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded"
+            >
+              {t('Hint')}
+            </button>
+            <button
+              onClick={handleTakeback}
+              className="flex-1 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded"
+            >
+              {t('Takeback')}
+            </button>
+          </div>
+        )}
+        {hintMove && (
+          <div className="w-full max-w-lg text-sm text-center opacity-90">
+            Hint: <span className="font-mono">{hintMove}</span>
+          </div>
+        )}
 
         <div className="mt-4 text-center text-sm text-gray-500 w-full max-w-lg break-all">
           Game Link: {window.location.href}

@@ -7,6 +7,7 @@ import Home from './pages/Home';
 import Game from './pages/Game';
 import Replays from './pages/Replays';
 import Admin from './pages/Admin';
+import Leaderboard from './pages/Leaderboard';
 import { Sun, Moon, Globe } from 'lucide-react';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined;
@@ -15,6 +16,14 @@ function App() {
   const { t, i18n } = useTranslation();
   const [socket, setSocket] = useState(null);
   const [sessionId, setSessionId] = useState('');
+  const [deviceId] = useState(() => {
+    let did = localStorage.getItem('chess_device_id');
+    if (!did) {
+      did = uuidv4();
+      localStorage.setItem('chess_device_id', did);
+    }
+    return did;
+  });
 
   const getInitialTheme = () => {
     const savedTheme = localStorage.getItem('theme');
@@ -89,6 +98,7 @@ function App() {
           <div className="flex gap-4 items-center">
             <Link to="/" className="text-2xl font-bold">{t('Play Chess')}</Link>
             <Link to="/replays" className="hover:underline">{t('Replays')}</Link>
+            <Link to="/leaderboard" className="hover:underline">{t('Leaderboard')}</Link>
             <Link to="/admin" className="hover:underline">Admin</Link>
           </div>
           <div className="flex gap-4">
@@ -113,9 +123,10 @@ function App() {
 
         <main className="container mx-auto px-4 pb-8">
           <Routes>
-            <Route path="/" element={<Home socket={socket} sessionId={sessionId} />} />
-            <Route path="/game/:id" element={<Game socket={socket} sessionId={sessionId} />} />
+            <Route path="/" element={<Home socket={socket} sessionId={sessionId} deviceId={deviceId} />} />
+            <Route path="/game/:id" element={<Game socket={socket} sessionId={sessionId} deviceId={deviceId} />} />
             <Route path="/replays" element={<Replays />} />
+            <Route path="/leaderboard" element={<Leaderboard />} />
             <Route path="/admin" element={<Admin />} />
           </Routes>
         </main>
