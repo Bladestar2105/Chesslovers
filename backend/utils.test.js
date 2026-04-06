@@ -1,5 +1,33 @@
 const assert = require('assert');
-const { parseTimeControl } = require('./utils');
+
+// Mock jsonwebtoken
+const jwtMock = {
+  verify: (token, secret) => {
+    if (token === 'invalid-token') throw new Error('Invalid token');
+    if (token === 'non-admin-token') return { admin: false };
+    if (token === 'admin-token') return { admin: true };
+    throw new Error('Unexpected token');
+  }
+};
+
+const { parseTimeControl, authenticateAdmin: createAuthenticateAdmin } = require('./utils');
+
+const JWT_SECRET = 'test-secret';
+const authenticateAdmin = createAuthenticateAdmin(JWT_SECRET, jwtMock);
+
+function mockRes() {
+  const res = {
+    status: function(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json: function(data) {
+      this.jsonData = data;
+      return this;
+    }
+  };
+  return res;
+}
 
 try {
   console.log('Testing parseTimeControl...');
@@ -22,9 +50,69 @@ try {
   assert.deepStrictEqual(parseTimeControl('120|30'), { base: 7200, inc: 30 });
   console.log('✓ 120|30');
 
-  console.log('All tests passed!');
+  console.log('\nTesting authenticateAdmin middleware...');
+
+  // Test case 1: Missing authorization header
+  {
+    const req = { headers: {} };
+    const res = mockRes();
+    let nextCalled = false;
+    authenticateAdmin(req, res, () => { nextCalled = true; });
+    assert.strictEqual(nextCalled, false);
+    assert.strictEqual(res.statusCode, 401);
+    assert.deepStrictEqual(res.jsonData, { error: 'Missing authorization header' });
+    console.log('✓ Missing authorization header (401)');
+  }
+
+  // Test case 2: Invalid token
+  {
+    const req = { headers: { authorization: 'Bearer invalid-token' } };
+    const res = mockRes();
+    let nextCalled = false;
+    authenticateAdmin(req, res, () => { nextCalled = true; });
+    assert.strictEqual(nextCalled, false);
+    assert.strictEqual(res.statusCode, 401);
+    assert.deepStrictEqual(res.jsonData, { error: 'Invalid token' });
+    console.log('✓ Invalid token (401)');
+  }
+
+  // Test case 3: Token without admin flag
+  {
+    const req = { headers: { authorization: 'Bearer non-admin-token' } };
+    const res = mockRes();
+    let nextCalled = false;
+    authenticateAdmin(req, res, () => { nextCalled = true; });
+    assert.strictEqual(nextCalled, false);
+    assert.strictEqual(res.statusCode, 403);
+    assert.deepStrictEqual(res.jsonData, { error: 'Not an admin' });
+    console.log('✓ Token without admin flag (403)');
+  }
+
+  // Test case 4: Valid admin token
+  {
+    const req = { headers: { authorization: 'Bearer admin-token' } };
+    const res = mockRes();
+    let nextCalled = false;
+    authenticateAdmin(req, res, () => { nextCalled = true; });
+    assert.strictEqual(nextCalled, true);
+    console.log('✓ Valid admin token (next called)');
+  }
+
+  // Test case 5: Missing token after Bearer
+  {
+    const req = { headers: { authorization: 'Bearer ' } };
+    const res = mockRes();
+    let nextCalled = false;
+    authenticateAdmin(req, res, () => { nextCalled = true; });
+    assert.strictEqual(nextCalled, false);
+    assert.strictEqual(res.statusCode, 401);
+    assert.deepStrictEqual(res.jsonData, { error: 'Missing authorization header' });
+    console.log('✓ Missing token after Bearer (401)');
+  }
+
+  console.log('\nAll tests passed!');
 } catch (err) {
-  console.error('Test failed!');
+  console.error('\nTest failed!');
   console.error(err);
   process.exit(1);
 }
