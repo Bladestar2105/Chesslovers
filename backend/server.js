@@ -31,7 +31,7 @@ const VERSION = pkg.version;
 
 // In-memory game state
 const activeGames = new Map();
-let matchmakingQueue = [];
+const matchmakingQueue = new Map();
 let federationExchangeCodes = new Map();
 const federationStatus = new Map(); // id -> { isActive: boolean, version: string, lastSeen: number }
 
@@ -302,10 +302,17 @@ app.post('/api/federation/matchmaking', (req, res) => {
     return res.status(401).json({ error: 'Unauthorized federation partner' });
   }
 
-  const opponent = matchmakingQueue.find(p => p.timeControl === timeControl);
+  let opponent = null;
+  for (const p of matchmakingQueue.values()) {
+    if (p.timeControl === timeControl) {
+      opponent = p;
+      break;
+    }
+  }
+
   if (opponent) {
     // Remove from queue
-    matchmakingQueue = matchmakingQueue.filter(p => p.socketId !== opponent.socketId);
+    matchmakingQueue.delete(opponent.socketId);
 
     const gameId = uuidv4();
     const chess = new Chess();
@@ -575,10 +582,17 @@ io.on('connection', (socket) => {
 
     for (const target of targets) {
       if (target === 'local') {
-        const opponent = matchmakingQueue.find(p => p.timeControl === timeControl && p.sessionId !== sessionId);
+        let opponent = null;
+        for (const p of matchmakingQueue.values()) {
+          if (p.timeControl === timeControl && p.sessionId !== sessionId) {
+            opponent = p;
+            break;
+          }
+        }
+
         if (opponent) {
           // Remove from queue
-          matchmakingQueue = matchmakingQueue.filter(p => p.socketId !== opponent.socketId);
+          matchmakingQueue.delete(opponent.socketId);
 
           const gameId = uuidv4();
           const chess = new Chess();
@@ -683,7 +697,7 @@ io.on('connection', (socket) => {
     }
 
     // Still no match across ANY target, wait locally
-    matchmakingQueue.push({ socketId: socket.id, sessionId, timeControl, playerName });
+    matchmakingQueue.set(socket.id, { socketId: socket.id, sessionId, timeControl, playerName });
     socket.emit('waiting_for_opponent');
   });
 
@@ -780,7 +794,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    matchmakingQueue = matchmakingQueue.filter(p => p.socketId !== socket.id);
+    matchmakingQueue.delete(socket.id);
   });
 });
 
