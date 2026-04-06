@@ -32,10 +32,94 @@ const VERSION = pkg.version;
 // In-memory game state
 const activeGames = new Map();
 const matchmakingQueue = new Map();
+const pendingRematches = new Map(); // gameId -> Set(playerKey)
+const activeSeries = new Map(); // seriesId -> { players: [a,b], score: {a,b}, gamesPlayed }
 let federationExchangeCodes = new Map();
 const federationStatus = new Map(); // id -> { isActive: boolean, version: string, lastSeen: number }
 
 const authenticateAdmin = createAuthenticateAdmin(JWT_SECRET, jwt);
+
+const DEFAULT_RATING = 1200;
+const K_FACTOR = 24;
+
+const normalizePlayerKey = (playerKey) => (playerKey && String(playerKey).trim() ? String(playerKey).trim() : null);
+
+function getOrCreateRating(playerKey, displayName) {
+  const normalized = normalizePlayerKey(playerKey);
+  if (!normalized) return null;
+  db.upsertPlayerDisplayName(normalized, displayName);
+  return db.getRating(normalized) || {
+    player_key: normalized,
+    display_name: displayName || null,
+    rating: DEFAULT_RATING,
+    games_played: 0,
+    wins: 0,
+    draws: 0,
+    losses: 0
+  };
+}
+
+function expectedScore(playerRating, opponentRating) {
+  return 1 / (1 + Math.pow(10, (opponentRating - playerRating) / 400));
+}
+
+function updateRatingsForGame(game) {
+  if (!game.whitePlayerKey || !game.blackPlayerKey) return;
+
+  const white = getOrCreateRating(game.whitePlayerKey, game.whiteName || 'White');
+  const black = getOrCreateRating(game.blackPlayerKey, game.blackName || 'Black');
+  if (!white || !black) return;
+
+  let whiteScore = 0.5;
+  let blackScore = 0.5;
+  if (game.status === 'mate' || game.status === 'resign' || game.status === 'timeout') {
+    if (game.resultWinner === 'w' || game.resultWinner === 'white') {
+      whiteScore = 1;
+      blackScore = 0;
+    } else if (game.resultWinner === 'b' || game.resultWinner === 'black') {
+      whiteScore = 0;
+      blackScore = 1;
+    }
+  }
+
+  const expectedWhite = expectedScore(white.rating, black.rating);
+  const expectedBlack = expectedScore(black.rating, white.rating);
+  const whiteRating = Math.round(white.rating + K_FACTOR * (whiteScore - expectedWhite));
+  const blackRating = Math.round(black.rating + K_FACTOR * (blackScore - expectedBlack));
+
+  db.saveRating({
+    player_key: white.player_key,
+    display_name: game.whiteName || white.display_name || 'White',
+    rating: whiteRating,
+    games_played: white.games_played + 1,
+    wins: white.wins + (whiteScore === 1 ? 1 : 0),
+    draws: white.draws + (whiteScore === 0.5 ? 1 : 0),
+    losses: white.losses + (whiteScore === 0 ? 1 : 0)
+  });
+
+  db.saveRating({
+    player_key: black.player_key,
+    display_name: game.blackName || black.display_name || 'Black',
+    rating: blackRating,
+    games_played: black.games_played + 1,
+    wins: black.wins + (blackScore === 1 ? 1 : 0),
+    draws: black.draws + (blackScore === 0.5 ? 1 : 0),
+    losses: black.losses + (blackScore === 0 ? 1 : 0)
+  });
+}
+
+function buildLeaderboardRows(rows, sourceLabel) {
+  return rows.map((row) => ({
+    playerKey: row.player_key,
+    name: row.display_name || 'Anonymous',
+    rating: row.rating,
+    gamesPlayed: row.games_played,
+    wins: row.wins,
+    draws: row.draws,
+    losses: row.losses,
+    source: sourceLabel
+  }));
+}
 
 app.post('/api/admin/login', (req, res) => {
   const { password } = req.body;
@@ -148,6 +232,89 @@ app.get('/api/info', (req, res) => {
   res.json({ instanceId: db.instanceId, version: VERSION });
 });
 
+app.get('/api/federation/leaderboard', (req, res) => {
+  const initiatorInstanceId = req.query.initiatorInstanceId;
+  if (!initiatorInstanceId || !db.getFederationLink(initiatorInstanceId)) {
+    return res.status(401).json({ error: 'Unauthorized federation partner' });
+  }
+  const top = db.getTopRatings(50);
+  res.json({ instanceId: db.instanceId, players: buildLeaderboardRows(top, db.instanceId) });
+});
+
+app.get('/api/leaderboard', async (req, res) => {
+  const includeFederated = String(req.query.federated || '1') === '1';
+  const localRows = buildLeaderboardRows(db.getTopRatings(100), db.instanceId);
+  const byKey = new Map(localRows.map((r) => [r.playerKey, r]));
+
+  if (includeFederated) {
+    const links = db.getFederationLinks();
+    await Promise.all(links.map(async (link) => {
+      const status = federationStatus.get(link.id);
+      if (!status || !status.isActive || status.version !== VERSION) return;
+      try {
+        const response = await fetch(`${link.partner_url}/api/federation/leaderboard?initiatorInstanceId=${encodeURIComponent(db.instanceId)}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        (data.players || []).forEach((p) => {
+          const existing = byKey.get(p.playerKey);
+          if (!existing || p.rating > existing.rating) {
+            byKey.set(p.playerKey, { ...p, source: data.instanceId || link.id });
+          }
+        });
+      } catch (err) {
+        console.error('Failed to fetch federated leaderboard', err.message);
+      }
+    }));
+  }
+
+  const players = [...byKey.values()]
+    .sort((a, b) => b.rating - a.rating || b.gamesPlayed - a.gamesPlayed)
+    .slice(0, 100)
+    .map((p, idx) => ({ ...p, rank: idx + 1 }));
+
+  res.json({ players, generatedAt: new Date().toISOString() });
+});
+
+app.post('/api/analyze/hint', async (req, res) => {
+  const { fen, level = 3 } = req.body || {};
+  if (!fen) return res.status(400).json({ error: 'fen is required' });
+  try {
+    const enginePath = path.join(__dirname, 'node_modules', 'stockfish', 'bin', 'stockfish-18-single.js');
+    const engine = spawn('node', [enginePath]);
+    let answered = false;
+    let buffer = '';
+    const timeout = setTimeout(() => {
+      if (!answered) {
+        answered = true;
+        engine.kill();
+        res.status(504).json({ error: 'analysis timeout' });
+      }
+    }, 4000);
+
+    engine.stdout.on('data', (data) => {
+      buffer += data.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith('bestmove') && !answered) {
+          answered = true;
+          clearTimeout(timeout);
+          const move = line.split(' ')[1];
+          engine.kill();
+          return res.json({ bestmove: move });
+        }
+      }
+    });
+
+    engine.stdin.write('uci\n');
+    engine.stdin.write(`setoption name Skill Level value ${Math.max(1, Math.min(20, Number(level) * 2))}\n`);
+    engine.stdin.write(`position fen ${fen}\n`);
+    engine.stdin.write(`go depth ${Math.max(6, Math.min(14, Number(level) + 6))}\n`);
+  } catch (err) {
+    res.status(500).json({ error: 'analysis failed' });
+  }
+});
+
 // Heartbeat interval to check federation partners
 setInterval(async () => {
   const links = db.getFederationLinks();
@@ -235,16 +402,19 @@ app.post('/api/federation/sync-event', (req, res) => {
     }
   } else if (event === 'resign') {
     game.status = 'resign';
+    game.resultWinner = data.winner;
     io.to(game.id).emit('game_over', { reason: 'resign', winner: data.winner });
     saveAndRemoveGame(game);
   } else if (event === 'offer_draw') {
     io.to(game.id).emit('draw_offered');
   } else if (event === 'accept_draw') {
     game.status = 'draw';
+    game.resultWinner = null;
     io.to(game.id).emit('game_over', { reason: 'draw' });
     saveAndRemoveGame(game);
   } else if (event === 'timeout') {
     game.status = 'timeout';
+    game.resultWinner = data.winner;
     io.to(game.id).emit('game_over', { reason: 'timeout', winner: data.winner });
     saveAndRemoveGame(game);
   }
@@ -260,8 +430,11 @@ function saveToDb(game) {
       timeControl: game.timeControl,
       white: game.white,
       black: game.black,
+      whitePlayerKey: game.whitePlayerKey,
+      blackPlayerKey: game.blackPlayerKey,
       isCpu: game.isCpu,
-      cpuLevel: game.cpuLevel
+      cpuLevel: game.cpuLevel,
+      learningMode: game.learningMode
   });
 }
 
@@ -280,7 +453,7 @@ function sendFederationEvent(game, event, data) {
 }
 
 app.post('/api/federation/matchmaking', (req, res) => {
-  const { timeControl, sessionId, playerName, initiatorInstanceId } = req.body;
+  const { timeControl, sessionId, playerName, playerKey, initiatorInstanceId } = req.body;
 
   if (!initiatorInstanceId || !db.getFederationLink(initiatorInstanceId)) {
     return res.status(401).json({ error: 'Unauthorized federation partner' });
@@ -309,8 +482,10 @@ app.post('/api/federation/matchmaking', (req, res) => {
       chess,
       white: opponent.sessionId,
       whiteName: opponent.playerName,
+      whitePlayerKey: opponent.playerKey,
       black: sessionId,
       blackName: playerName,
+      blackPlayerKey: normalizePlayerKey(playerKey),
       isCpu: false,
       timeControl,
       status: 'active',
@@ -333,6 +508,8 @@ app.post('/api/federation/matchmaking', (req, res) => {
       timeControl: gameData.timeControl,
       white: gameData.white,
       black: gameData.black,
+      whitePlayerKey: gameData.whitePlayerKey,
+      blackPlayerKey: gameData.blackPlayerKey,
       isCpu: false
     });
 
@@ -380,7 +557,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('create_game', ({ isCpu, cpuLevel, timeControl, sessionId, customGameId, playerName }) => {
+  socket.on('create_game', ({ isCpu, cpuLevel, timeControl, sessionId, customGameId, playerName, playerKey, learningMode = false, seriesId = null }) => {
     // Generate an 8-character ID if it's a friend game and no customGameId was provided
     // This makes it easy to share. Keep uuid for cpu games or random if desired.
     const gameId = customGameId ? customGameId : (isCpu ? uuidv4() : crypto.randomBytes(4).toString('hex'));
@@ -394,10 +571,14 @@ io.on('connection', (socket) => {
       chess,
       white: sessionId,
       whiteName: playerName,
+      whitePlayerKey: normalizePlayerKey(playerKey),
       black: isCpu ? 'cpu' : null,
       blackName: isCpu ? 'CPU' : null,
+      blackPlayerKey: isCpu ? 'cpu' : null,
       isCpu,
       cpuLevel,
+      learningMode: Boolean(learningMode),
+      seriesId,
       timeControl,
       status: 'active',
       whiteTime: time,
@@ -451,14 +632,17 @@ io.on('connection', (socket) => {
       timeControl,
       white: sessionId,
       black: gameData.black,
+      whitePlayerKey: gameData.whitePlayerKey,
+      blackPlayerKey: gameData.blackPlayerKey,
       isCpu,
-      cpuLevel
+      cpuLevel,
+      learningMode: gameData.learningMode
     });
 
     socket.emit('game_created', { gameId, side: 'w' });
   });
 
-  socket.on('join_friend_game', ({ gameId, timeControl, sessionId, playerName }) => {
+  socket.on('join_friend_game', ({ gameId, timeControl, sessionId, playerName, playerKey }) => {
     // Treat joining via explicit ID like creating or joining if exists
     const existing = activeGames.get(gameId);
     if (existing) {
@@ -474,8 +658,10 @@ io.on('connection', (socket) => {
          id: gameId,
          chess,
          white: sessionId,
-      whiteName: playerName,
+         whiteName: playerName,
+         whitePlayerKey: normalizePlayerKey(playerKey),
          black: null,
+         blackPlayerKey: null,
          isCpu: false,
          timeControl,
          status: 'active',
@@ -492,13 +678,15 @@ io.on('connection', (socket) => {
          timeControl,
          white: sessionId,
          black: null,
+         whitePlayerKey: gameData.whitePlayerKey,
+         blackPlayerKey: null,
          isCpu: false
        });
        socket.emit('game_created', { gameId, side: 'w' });
     }
   });
 
-  socket.on('join_game', ({ gameId, sessionId, playerName }) => {
+  socket.on('join_game', ({ gameId, sessionId, playerName, playerKey }) => {
     const game = activeGames.get(gameId);
     if (!game) {
       return socket.emit('error', 'Game not found');
@@ -507,7 +695,7 @@ io.on('connection', (socket) => {
     socket.join(gameId);
 
     if (game.white === sessionId) {
-      socket.emit('game_joined', { gameId, side: 'w', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName });
+      socket.emit('game_joined', { gameId, side: 'w', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName, learningMode: game.learningMode, seriesState: game.seriesState || null });
       if (game.black) {
         socket.emit('player_joined', { message: 'Opponent is here', blackName: game.blackName, whiteName: game.whiteName });
       }
@@ -515,7 +703,7 @@ io.on('connection', (socket) => {
     }
 
     if (game.black === sessionId) {
-      socket.emit('game_joined', { gameId, side: 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName });
+      socket.emit('game_joined', { gameId, side: 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName, learningMode: game.learningMode, seriesState: game.seriesState || null });
       return;
     }
 
@@ -527,10 +715,11 @@ io.on('connection', (socket) => {
     if (playerName) {
       game.blackName = playerName;
     }
+    game.blackPlayerKey = normalizePlayerKey(playerKey);
 
     // Ensure timer doesn't start until the first move is made
     game.lastMoveTime = null;
-    socket.emit('game_joined', { gameId, side: 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName });
+    socket.emit('game_joined', { gameId, side: 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName, learningMode: game.learningMode, seriesState: game.seriesState || null });
     io.to(gameId).emit('player_joined', { message: 'Black has joined', blackName: game.blackName, whiteName: game.whiteName });
 
     db.saveGame({
@@ -540,12 +729,14 @@ io.on('connection', (socket) => {
         timeControl: game.timeControl,
         white: game.white,
         black: game.black,
+        whitePlayerKey: game.whitePlayerKey,
+        blackPlayerKey: game.blackPlayerKey,
         isCpu: game.isCpu,
         cpuLevel: game.cpuLevel
     });
   });
 
-  socket.on('find_random', async ({ timeControl, sessionId, playerName }) => {
+  socket.on('find_random', async ({ timeControl, sessionId, playerName, playerKey }) => {
     // Gather all possible targets: local queue + active, compatible federation links
     const targets = ['local'];
     const links = db.getFederationLinks();
@@ -587,8 +778,10 @@ io.on('connection', (socket) => {
             chess,
             white: opponent.sessionId,
             whiteName: opponent.playerName,
+            whitePlayerKey: opponent.playerKey,
             black: sessionId,
             blackName: playerName,
+            blackPlayerKey: normalizePlayerKey(playerKey),
             isCpu: false,
             timeControl,
             status: 'active',
@@ -613,6 +806,8 @@ io.on('connection', (socket) => {
             timeControl: gameData.timeControl,
             white: gameData.white,
             black: gameData.black,
+            whitePlayerKey: gameData.whitePlayerKey,
+            blackPlayerKey: gameData.blackPlayerKey,
             isCpu: false
           });
           return; // Match found and started, exit completely
@@ -626,7 +821,7 @@ io.on('connection', (socket) => {
           const response = await fetch(`${target.partner_url}/api/federation/matchmaking`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ timeControl, sessionId, playerName, initiatorInstanceId: db.instanceId }),
+            body: JSON.stringify({ timeControl, sessionId, playerName, playerKey: normalizePlayerKey(playerKey), initiatorInstanceId: db.instanceId }),
             signal: controller.signal
           });
 
@@ -667,6 +862,8 @@ io.on('connection', (socket) => {
                  timeControl: gameData.timeControl,
                  white: gameData.white,
                  black: gameData.black,
+                 whitePlayerKey: gameData.whitePlayerKey,
+                 blackPlayerKey: gameData.blackPlayerKey,
                  isCpu: false
               });
 
@@ -681,7 +878,7 @@ io.on('connection', (socket) => {
     }
 
     // Still no match across ANY target, wait locally
-    matchmakingQueue.set(socket.id, { socketId: socket.id, sessionId, timeControl, playerName });
+    matchmakingQueue.set(socket.id, { socketId: socket.id, sessionId, timeControl, playerName, playerKey: normalizePlayerKey(playerKey) });
     socket.emit('waiting_for_opponent');
   });
 
@@ -725,6 +922,7 @@ io.on('connection', (socket) => {
     if (game.white === sessionId || game.black === sessionId) {
         game.status = 'resign';
         const winner = game.white === sessionId ? 'b' : 'w';
+        game.resultWinner = winner;
         io.to(gameId).emit('game_over', { reason: 'resign', winner });
         saveAndRemoveGame(game);
 
@@ -737,7 +935,6 @@ io.on('connection', (socket) => {
       if (!game) return;
       if (game.isCpu) return; // Cannot draw with CPU simply
 
-      const opponent = game.white === sessionId ? game.black : game.white;
       // In a real app we'd map session to socket, for now just broadcast
       socket.to(gameId).emit('draw_offered');
 
@@ -748,6 +945,7 @@ io.on('connection', (socket) => {
       const game = activeGames.get(gameId);
       if (!game) return;
       game.status = 'draw';
+      game.resultWinner = null;
       io.to(gameId).emit('game_over', { reason: 'draw' });
       saveAndRemoveGame(game);
 
@@ -765,16 +963,135 @@ io.on('connection', (socket) => {
       if (turn === 'w' && game.whiteTime - elapsed <= 1) { // 1 second grace
           game.whiteTime = 0;
           game.status = 'timeout';
+          game.resultWinner = 'b';
           io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'b' });
           saveAndRemoveGame(game);
           sendFederationEvent(game, 'timeout', { winner: 'b' });
       } else if (turn === 'b' && game.blackTime - elapsed <= 1) {
           game.blackTime = 0;
           game.status = 'timeout';
+          game.resultWinner = 'w';
           io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'w' });
           saveAndRemoveGame(game);
           sendFederationEvent(game, 'timeout', { winner: 'w' });
       }
+  });
+
+  socket.on('request_takeback', ({ gameId, sessionId }) => {
+    const game = activeGames.get(gameId);
+    if (!game || !game.learningMode || !game.isCpu) return;
+    if (game.white !== sessionId) return;
+
+    try {
+      // Undo CPU move + player move if possible
+      const undoneCpu = game.chess.undo();
+      const undonePlayer = game.chess.undo();
+      if (undoneCpu || undonePlayer) {
+        game.lastMoveTime = Date.now();
+        emitMoveMade(game);
+        saveToDb(game);
+      }
+    } catch (err) {
+      console.error('Takeback failed', err.message);
+    }
+  });
+
+  socket.on('request_rematch', ({ gameId, sessionId, playerKey }) => {
+    const game = activeGames.get(gameId);
+    if (game) return; // only allow rematch once game is over
+
+    const storedGame = db.getGame(gameId);
+    if (!storedGame) return;
+
+    const whiteSession = storedGame.white_player_id;
+    const blackSession = storedGame.black_player_id;
+    const whiteKey = storedGame.white_player_key;
+    const blackKey = storedGame.black_player_key;
+    const normalizedPlayerKey = normalizePlayerKey(playerKey);
+
+    const isAllowedBySession = sessionId === whiteSession || sessionId === blackSession;
+    const isAllowedByKey = normalizedPlayerKey && (normalizedPlayerKey === whiteKey || normalizedPlayerKey === blackKey);
+    if (!isAllowedBySession && !isAllowedByKey) return;
+
+    let set = pendingRematches.get(gameId);
+    if (!set) {
+      set = new Set();
+      pendingRematches.set(gameId, set);
+    }
+    set.add(normalizedPlayerKey || sessionId);
+
+    const expectedPlayers = new Set([whiteKey || whiteSession, blackKey || blackSession].filter(Boolean));
+    if (expectedPlayers.size < 2 || set.size < 2) {
+      socket.emit('rematch_waiting');
+      return;
+    }
+
+    pendingRematches.delete(gameId);
+    const newGameId = uuidv4();
+    const chess = new Chess();
+
+    const parsedTc = parseTimeControl(storedGame.time_control);
+    const isEven = (Date.now() % 2) === 0;
+    const white = isEven ? whiteSession : blackSession;
+    const black = isEven ? blackSession : whiteSession;
+    const whitePlayerKey = isEven ? storedGame.white_player_key : storedGame.black_player_key;
+    const blackPlayerKey = isEven ? storedGame.black_player_key : storedGame.white_player_key;
+
+    const seriesId = `series:${[storedGame.white_player_key || whiteSession, storedGame.black_player_key || blackSession].sort().join(':')}`;
+    const series = activeSeries.get(seriesId) || {
+      players: [storedGame.white_player_key || whiteSession, storedGame.black_player_key || blackSession],
+      score: {},
+      gamesPlayed: 0
+    };
+
+    if (storedGame.status === 'mate' || storedGame.status === 'resign' || storedGame.status === 'timeout') {
+      const winnerKey = storedGame.status && storedGame.black_player_id && storedGame.white_player_id
+        ? (storedGame.pgn?.includes('1-0') ? (storedGame.white_player_key || storedGame.white_player_id) : storedGame.pgn?.includes('0-1') ? (storedGame.black_player_key || storedGame.black_player_id) : null)
+        : null;
+      if (winnerKey) {
+        series.score[winnerKey] = (series.score[winnerKey] || 0) + 1;
+      }
+    }
+    series.gamesPlayed += 1;
+    activeSeries.set(seriesId, series);
+
+    const gameData = {
+      id: newGameId,
+      chess,
+      white,
+      black,
+      whitePlayerKey,
+      blackPlayerKey,
+      whiteName: null,
+      blackName: null,
+      isCpu: false,
+      timeControl: storedGame.time_control || '10|0',
+      status: 'active',
+      whiteTime: parsedTc.base,
+      blackTime: parsedTc.base,
+      lastMoveTime: null,
+      seriesId,
+      seriesState: {
+        seriesId,
+        score: series.score,
+        bestOf: 3,
+        gamesPlayed: series.gamesPlayed
+      }
+    };
+    activeGames.set(newGameId, gameData);
+    db.saveGame({
+      id: gameData.id,
+      pgn: chess.pgn(),
+      status: gameData.status,
+      timeControl: gameData.timeControl,
+      white: gameData.white,
+      black: gameData.black,
+      whitePlayerKey: gameData.whitePlayerKey,
+      blackPlayerKey: gameData.blackPlayerKey,
+      isCpu: false
+    });
+
+    io.to(gameId).emit('rematch_started', { previousGameId: gameId, gameId: newGameId });
   });
 
   socket.on('disconnect', () => {
@@ -817,12 +1134,14 @@ setInterval(() => {
         if (turn === 'w' && game.whiteTime - elapsed <= 0) {
             game.whiteTime = 0;
             game.status = 'timeout';
+            game.resultWinner = 'b';
             io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'b' });
             saveAndRemoveGame(game);
             sendFederationEvent(game, 'timeout', { winner: 'b' });
         } else if (turn === 'b' && game.blackTime - elapsed <= 0) {
             game.blackTime = 0;
             game.status = 'timeout';
+            game.resultWinner = 'w';
             io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'w' });
             saveAndRemoveGame(game);
             sendFederationEvent(game, 'timeout', { winner: 'w' });
@@ -845,9 +1164,13 @@ function saveAndRemoveGame(game) {
         timeControl: game.timeControl,
         white: game.white,
         black: game.black,
+        whitePlayerKey: game.whitePlayerKey,
+        blackPlayerKey: game.blackPlayerKey,
         isCpu: game.isCpu,
-        cpuLevel: game.cpuLevel
+        cpuLevel: game.cpuLevel,
+        learningMode: game.learningMode
     });
+    updateRatingsForGame(game);
     activeGames.delete(game.id);
 }
 
@@ -857,7 +1180,8 @@ function checkGameEnd(game, suppressFederationEvent = false) {
     if (game.chess.isCheckmate()) reason = 'mate';
     if (game.chess.isStalemate()) reason = 'stalemate';
     game.status = reason;
-    const winner = reason === 'mate' ? (game.chess.turn() === 'w' ? 'black' : 'white') : null;
+    const winner = reason === 'mate' ? (game.chess.turn() === 'w' ? 'b' : 'w') : null;
+    game.resultWinner = winner;
     io.to(game.id).emit('game_over', { reason, winner });
     saveAndRemoveGame(game);
     // Move handles mate inside chess logic, no explicit send event here needed usually

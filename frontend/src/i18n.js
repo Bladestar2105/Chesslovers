@@ -49,6 +49,20 @@ const resources = {
       "Back to list": "Back to list",
       "Illegal move": "Illegal move",
       "Connection error": "Connection error"
+      ,"Leaderboard": "Leaderboard"
+      ,"Loading...": "Loading..."
+      ,"Player": "Player"
+      ,"Rating": "Rating"
+      ,"Games": "Games"
+      ,"Rematch": "Rematch"
+      ,"Requesting rematch...": "Requesting rematch..."
+      ,"Learning mode": "Learning mode"
+      ,"Hint": "Hint"
+      ,"Takeback": "Takeback"
+      ,"Import PGN": "Import PGN"
+      ,"Export PGN": "Export PGN"
+      ,"Copy PGN": "Copy PGN"
+      ,"Best of 3": "Best of 3"
     }
   },
   de: {
@@ -97,6 +111,20 @@ const resources = {
       "Back to list": "Zurück zur Liste",
       "Illegal move": "Illegaler Zug",
       "Connection error": "Verbindungsfehler"
+      ,"Leaderboard": "Bestenliste"
+      ,"Loading...": "Lädt..."
+      ,"Player": "Spieler"
+      ,"Rating": "Rating"
+      ,"Games": "Spiele"
+      ,"Rematch": "Revanche"
+      ,"Requesting rematch...": "Revanche wird angefragt..."
+      ,"Learning mode": "Lernmodus"
+      ,"Hint": "Hinweis"
+      ,"Takeback": "Zug zurück"
+      ,"Import PGN": "PGN importieren"
+      ,"Export PGN": "PGN exportieren"
+      ,"Copy PGN": "PGN kopieren"
+      ,"Best of 3": "Best of 3"
     }
   }
 };

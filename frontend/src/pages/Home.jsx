@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-function Home({ socket, sessionId }) {
+function Home({ socket, sessionId, deviceId }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [mode, setMode] = useState('cpu'); // cpu, random, friend
   const [difficulty, setDifficulty] = useState(1);
   const [timeControl, setTimeControl] = useState('10|0');
   const [waiting, setWaiting] = useState(false);
+  const [learningMode, setLearningMode] = useState(false);
   const [friendGameId, setFriendGameId] = useState('');
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') || '');
 
@@ -46,15 +47,15 @@ function Home({ socket, sessionId }) {
   const handleStart = () => {
     const nameToUse = playerName.trim() || undefined;
     if (mode === 'cpu') {
-      socket.emit('create_game', { isCpu: true, cpuLevel: parseInt(difficulty), timeControl, sessionId, playerName: nameToUse });
+      socket.emit('create_game', { isCpu: true, cpuLevel: parseInt(difficulty), timeControl, sessionId, playerName: nameToUse, playerKey: deviceId, learningMode });
     } else if (mode === 'friend') {
       if (friendGameId) {
-        socket.emit('join_friend_game', { gameId: friendGameId, timeControl, sessionId, playerName: nameToUse });
+        socket.emit('join_friend_game', { gameId: friendGameId, timeControl, sessionId, playerName: nameToUse, playerKey: deviceId });
       } else {
-        socket.emit('create_game', { isCpu: false, timeControl, sessionId, playerName: nameToUse });
+        socket.emit('create_game', { isCpu: false, timeControl, sessionId, playerName: nameToUse, playerKey: deviceId });
       }
     } else if (mode === 'random') {
-      socket.emit('find_random', { timeControl, sessionId, playerName: nameToUse });
+      socket.emit('find_random', { timeControl, sessionId, playerName: nameToUse, playerKey: deviceId });
     }
   };
 
@@ -92,6 +93,14 @@ function Home({ socket, sessionId }) {
               className="w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
             />
             <div className="text-center">{difficulty}</div>
+            <label className="flex items-center gap-2 mt-3 text-sm">
+              <input
+                type="checkbox"
+                checked={learningMode}
+                onChange={(e) => setLearningMode(e.target.checked)}
+              />
+              {t('Learning mode')}
+            </label>
           </div>
         )}
 
@@ -132,11 +141,17 @@ function Home({ socket, sessionId }) {
             onChange={(e) => setTimeControl(e.target.value)}
             className="w-full p-2 border rounded-md bg-[var(--panel-bg)] border-[var(--border-color)] text-[var(--text-color)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           >
+            <option value="1|0">Bullet 1|0</option>
+            <option value="1|1">Bullet 1|1</option>
+            <option value="2|1">Bullet 2|1</option>
             <option value="3|0">Blitz 3|0</option>
             <option value="3|2">Blitz 3|2</option>
             <option value="5|0">Blitz 5|0</option>
+            <option value="5|3">Blitz 5|3</option>
             <option value="10|0">Rapid 10|0</option>
             <option value="15|10">Rapid 15|10</option>
+            <option value="30|0">Classical 30|0</option>
+            <option value="45|15">Classical 45|15</option>
             <option value="unlimited">Unlimited</option>
           </select>
         </div>
