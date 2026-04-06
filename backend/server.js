@@ -878,5 +878,4 @@ function checkGameEnd(game, suppressFederationEvent = false) {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Instance ID: ${db.instanceId}`);
-  console.log(`Admin Password: ${db.adminPassword}`);
 });
