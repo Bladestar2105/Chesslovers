@@ -10,7 +10,12 @@ const jwtMock = {
   }
 };
 
-const { parseTimeControl, authenticateAdmin: createAuthenticateAdmin } = require('./utils');
+const {
+  parseTimeControl,
+  authenticateAdmin: createAuthenticateAdmin,
+  normalizeSessionId,
+  isSessionParticipant
+} = require('./utils');
 
 const JWT_SECRET = 'test-secret';
 const authenticateAdmin = createAuthenticateAdmin(JWT_SECRET, jwtMock);
@@ -127,6 +132,19 @@ try {
     assert.deepStrictEqual(res.jsonData, { error: 'Missing authorization header' });
     console.log('✓ Wrong auth scheme is rejected (401)');
   }
+
+
+  console.log('\nTesting session helpers...');
+
+  assert.strictEqual(normalizeSessionId('  abc  '), 'abc');
+  assert.strictEqual(normalizeSessionId(''), '');
+  assert.strictEqual(normalizeSessionId(undefined), '');
+  console.log('✓ normalizeSessionId trims and handles non-string values');
+
+  assert.strictEqual(isSessionParticipant({ white: 'w1', black: 'b1' }, ' w1 '), true);
+  assert.strictEqual(isSessionParticipant({ white: 'w1', black: 'b1' }, 'x1'), false);
+  assert.strictEqual(isSessionParticipant(null, 'w1'), false);
+  console.log('✓ isSessionParticipant validates membership with normalization');
 
   console.log('\nAll tests passed!');
 } catch (err) {

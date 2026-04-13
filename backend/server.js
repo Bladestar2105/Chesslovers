@@ -11,7 +11,12 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
 const pkg = require('./package.json');
-const { parseTimeControl, authenticateAdmin: createAuthenticateAdmin } = require('./utils');
+const {
+  parseTimeControl,
+  authenticateAdmin: createAuthenticateAdmin,
+  normalizeSessionId,
+  isSessionParticipant
+} = require('./utils');
 
 const app = express();
 app.use(cors());
@@ -540,13 +545,6 @@ const sendStockfishCmd = (engine, cmd) => {
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
-
-  const normalizeSessionId = (sessionId) => (typeof sessionId === 'string' ? sessionId.trim() : '');
-
-  const isSessionParticipant = (game, sessionId) => {
-    const normalizedSessionId = normalizeSessionId(sessionId);
-    return Boolean(game && normalizedSessionId && (game.white === normalizedSessionId || game.black === normalizedSessionId));
-  };
 
   // Resume a disconnected game
   socket.on('rejoin', ({ sessionId }) => {

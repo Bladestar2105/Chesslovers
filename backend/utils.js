@@ -1,3 +1,11 @@
+
+const normalizeSessionId = (sessionId) => (typeof sessionId === 'string' ? sessionId.trim() : '');
+
+const isSessionParticipant = (game, sessionId) => {
+  const normalizedSessionId = normalizeSessionId(sessionId);
+  return Boolean(game && normalizedSessionId && (game.white === normalizedSessionId || game.black === normalizedSessionId));
+};
+
 const parseTimeControl = (tc) => {
   if (tc === 'unlimited') return { base: null, inc: null };
 
@@ -33,5 +41,7 @@ const authenticateAdmin = (jwtSecret, jwt) => (req, res, next) => {
 
 module.exports = {
   parseTimeControl,
-  authenticateAdmin
+  authenticateAdmin,
+  normalizeSessionId,
+  isSessionParticipant
 };
