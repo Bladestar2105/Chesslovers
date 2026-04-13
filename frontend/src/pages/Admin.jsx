@@ -6,7 +6,7 @@ const API_URL = import.meta.env.VITE_SOCKET_URL || '';
 function Admin() {
   const { t } = useTranslation();
   const [password, setPassword] = useState('');
-  const [token, setToken] = useState(localStorage.getItem('adminToken') || '');
+  const [token, setToken] = useState(sessionStorage.getItem('adminToken') || '');
   const [error, setError] = useState('');
 
   const [info, setInfo] = useState(null);
@@ -17,6 +17,8 @@ function Admin() {
   const [activeTab, setActiveTab] = useState('info'); // 'info', 'replays', 'federation'
   const [newPassword, setNewPassword] = useState('');
   const [passwordMessage, setPasswordMessage] = useState('');
+  const [toastMessage, setToastMessage] = useState('');
+  const [confirmAction, setConfirmAction] = useState(null);
 
   const handleError = (err, customMessage) => {
     console.error(err);
@@ -24,7 +26,7 @@ function Admin() {
       if (typeof customMessage === 'function') {
         customMessage(t('Connection error'));
       } else {
-        alert(t('Connection error'));
+        setToastMessage(t('Connection error'));
       }
     }
   };
@@ -73,7 +75,7 @@ function Admin() {
       const data = await res.json();
       if (res.ok && data.token) {
         setToken(data.token);
-        localStorage.setItem('adminToken', data.token);
+        sessionStorage.setItem('adminToken', data.token);
       } else {
         setError(data.error || 'Login failed');
       }
@@ -84,14 +86,17 @@ function Admin() {
 
   const handleLogout = () => {
     setToken('');
-    localStorage.removeItem('adminToken');
+    sessionStorage.removeItem('adminToken');
     setInfo(null);
   };
 
 
 
-  const handleDeleteReplay = async (id) => {
-    if (!window.confirm('Delete this replay?')) return;
+  const handleDeleteReplay = (id) => {
+    setConfirmAction({ type: 'delete_replay', id });
+  };
+
+  const runDeleteReplay = async (id) => {
     try {
       const res = await fetch(`${API_URL}/api/admin/replays/${id}`, {
         method: 'DELETE',
@@ -103,8 +108,11 @@ function Admin() {
     }
   };
 
-  const handleClearReplays = async () => {
-    if (!window.confirm('Are you sure you want to delete ALL replays?')) return;
+  const handleClearReplays = () => {
+    setConfirmAction({ type: 'clear_replays' });
+  };
+
+  const runClearReplays = async () => {
     try {
       const res = await fetch(`${API_URL}/api/admin/replays`, {
         method: 'DELETE',
@@ -126,12 +134,12 @@ function Admin() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert('Successfully linked!');
+        setToastMessage('Successfully linked!');
         setPartnerUrl('');
         setPartnerId('');
         fetchInfo();
       } else {
-        alert(data.error || 'Failed to link');
+        setToastMessage(data.error || 'Failed to link');
       }
     } catch (e) {
       handleError(e, true);
@@ -159,8 +167,11 @@ function Admin() {
     }
   };
 
-  const handleDeleteLink = async (id) => {
-    if (!window.confirm('Remove this partner?')) return;
+  const handleDeleteLink = (id) => {
+    setConfirmAction({ type: 'delete_link', id });
+  };
+
+  const runDeleteLink = async (id) => {
     try {
       const res = await fetch(`${API_URL}/api/admin/federation/link/${id}`, {
         method: 'DELETE',
@@ -180,14 +191,32 @@ function Admin() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert(`Successfully synced ${data.synced} replays from partners!`);
+        setToastMessage(`Successfully synced ${data.synced} replays from partners!`);
         fetchReplays();
       } else {
-        alert('Failed to sync');
+        setToastMessage('Failed to sync');
       }
     } catch (e) {
       handleError(e, true);
     }
+  };
+
+  useEffect(() => {
+    if (!toastMessage) return undefined;
+    const timeout = setTimeout(() => setToastMessage(''), 2600);
+    return () => clearTimeout(timeout);
+  }, [toastMessage]);
+
+  const executeConfirmAction = async () => {
+    if (!confirmAction) return;
+    if (confirmAction.type === 'delete_replay') {
+      await runDeleteReplay(confirmAction.id);
+    } else if (confirmAction.type === 'clear_replays') {
+      await runClearReplays();
+    } else if (confirmAction.type === 'delete_link') {
+      await runDeleteLink(confirmAction.id);
+    }
+    setConfirmAction(null);
   };
 
   if (!token) {
@@ -253,7 +282,7 @@ function Admin() {
                   onChange={e => setNewPassword(e.target.value)}
                   className="w-full p-2 border rounded-md bg-[var(--panel-bg)] border-[var(--border-color)] text-[var(--text-color)]"
                   required
-                  minLength={4}
+                  minLength={10}
                 />
               </div>
               <button type="submit" className="py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded">
@@ -403,6 +432,34 @@ function Admin() {
                  </form>
               </div>
           </div>
+        </div>
+      )}
+
+      {confirmAction && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="panel p-5 rounded-lg shadow-xl max-w-sm w-full space-y-4">
+            <p className="font-semibold">
+              {confirmAction.type === 'clear_replays'
+                ? 'Are you sure you want to delete ALL replays?'
+                : confirmAction.type === 'delete_link'
+                  ? 'Remove this partner?'
+                  : 'Delete this replay?'}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button className="px-3 py-2 rounded bg-gray-300 dark:bg-gray-700" onClick={() => setConfirmAction(null)}>
+                {t('Cancel')}
+              </button>
+              <button className="px-3 py-2 rounded bg-red-600 text-white" onClick={executeConfirmAction}>
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded bg-slate-900 text-white shadow-lg">
+          {toastMessage}
         </div>
       )}
     </div>

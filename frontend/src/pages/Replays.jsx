@@ -16,6 +16,17 @@ function Replays() {
   const [analysis, setAnalysis] = useState([]);
   const API_URL = import.meta.env.VITE_SOCKET_URL || '';
 
+  const analyzeReplayWithEngine = async (pgn) => {
+    const res = await fetch(`${API_URL}/api/analyze/replay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pgn, maxPlies: 40, level: 4 })
+    });
+    if (!res.ok) throw new Error('Engine analysis failed');
+    const data = await res.json();
+    return data.marks || [];
+  };
+
   useEffect(() => {
     fetch(`${API_URL}/api/replays`)
       .then(res => res.json())
@@ -34,7 +45,10 @@ function Replays() {
         chess.loadPgn(pgn);
         const h = chess.history({ verbose: true });
         setHistory(h);
-        setAnalysis(analyzeReplay(pgn));
+        setAnalysis([]);
+        analyzeReplayWithEngine(pgn)
+          .then((marks) => setAnalysis(marks))
+          .catch(() => setAnalysis(analyzeReplay(pgn)));
         chess.reset();
         setHistoryIndex(-1);
         setCurrentFen(chess.fen());

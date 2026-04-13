@@ -3,7 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const crypto = require('crypto');
 
-const dataDir = path.join(__dirname, 'data');
+const dataDir = process.env.CHESS_DATA_DIR || path.join(__dirname, 'data');
 const fs = require('fs');
 
 if (!fs.existsSync(dataDir)) {
@@ -11,6 +11,32 @@ if (!fs.existsSync(dataDir)) {
 }
 
 const db = new Database(path.join(dataDir, 'chess.db'));
+
+const PASSWORD_HASH_PREFIX = 'scrypt';
+
+const hashPassword = (password) => {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const iterations = 16384;
+  const keylen = 64;
+  const digest = 'sha512';
+  const hash = crypto.scryptSync(password, salt, keylen, { N: iterations }).toString('hex');
+  return `${PASSWORD_HASH_PREFIX}$${iterations}$${keylen}$${digest}$${salt}$${hash}`;
+};
+
+const isHashedPassword = (value) => typeof value === 'string' && value.startsWith(`${PASSWORD_HASH_PREFIX}$`);
+
+const verifyHashedPassword = (password, storedHash) => {
+  const parts = String(storedHash).split('$');
+  if (parts.length !== 6) return false;
+  const [, rawIterations, rawKeylen, , salt, hashHex] = parts;
+  const iterations = Number.parseInt(rawIterations, 10);
+  const keylen = Number.parseInt(rawKeylen, 10);
+  if (!Number.isFinite(iterations) || !Number.isFinite(keylen)) return false;
+  const derived = crypto.scryptSync(password, salt, keylen, { N: iterations });
+  const expected = Buffer.from(hashHex, 'hex');
+  if (derived.length !== expected.length) return false;
+  return crypto.timingSafeEqual(derived, expected);
+};
 
 // Initialize schema
 db.exec(`
@@ -73,11 +99,15 @@ const instanceId = instanceIdRow.value;
 
 // Get or generate Admin Password
 let adminPasswordRow = db.prepare('SELECT value FROM config WHERE key = ?').get('admin_password');
+let generatedAdminPassword = null;
 if (!adminPasswordRow) {
+  const envPassword = process.env.ADMIN_PASSWORD && String(process.env.ADMIN_PASSWORD).trim();
   // Generate a random 12 character password (base64 of 9 bytes is exactly 12 chars)
-  const newAdminPassword = crypto.randomBytes(9).toString('base64').replace(/\+/g, '8').replace(/\//g, '9');
-  db.prepare('INSERT INTO config (key, value) VALUES (?, ?)').run('admin_password', newAdminPassword);
-  adminPasswordRow = { value: newAdminPassword };
+  const newAdminPassword = envPassword || crypto.randomBytes(9).toString('base64').replace(/\+/g, '8').replace(/\//g, '9');
+  const hashedAdminPassword = hashPassword(newAdminPassword);
+  db.prepare('INSERT INTO config (key, value) VALUES (?, ?)').run('admin_password', hashedAdminPassword);
+  generatedAdminPassword = envPassword ? null : newAdminPassword;
+  adminPasswordRow = { value: hashedAdminPassword };
 }
 const adminPassword = adminPasswordRow.value;
 
@@ -95,6 +125,7 @@ module.exports = {
   db,
   instanceId,
   adminPassword,
+  generatedAdminPassword,
   jwtSecret,
   saveGame: (gameData) => {
     const stmt = db.prepare(`
@@ -150,9 +181,20 @@ module.exports = {
   deleteFederationLink: (id) => {
     db.prepare('DELETE FROM federation_links WHERE id = ?').run(id);
   },
+  verifyAdminPassword: (password) => {
+    const stored = module.exports.adminPassword;
+    if (!stored || !password) return false;
+    if (isHashedPassword(stored)) return verifyHashedPassword(password, stored);
+    const isValid = stored === password;
+    if (isValid) {
+      module.exports.updateAdminPassword(password);
+    }
+    return isValid;
+  },
   updateAdminPassword: (newPassword) => {
-    db.prepare('UPDATE config SET value = ? WHERE key = ?').run(newPassword, 'admin_password');
-    module.exports.adminPassword = newPassword;
+    const hashed = hashPassword(newPassword);
+    db.prepare('UPDATE config SET value = ? WHERE key = ?').run(hashed, 'admin_password');
+    module.exports.adminPassword = hashed;
   },
   upsertPlayerDisplayName: (playerKey, displayName) => {
     if (!playerKey) return;
