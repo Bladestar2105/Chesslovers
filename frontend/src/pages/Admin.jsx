@@ -77,7 +77,13 @@ function Admin() {
         setToken(data.token);
         sessionStorage.setItem('adminToken', data.token);
       } else {
-        setError(data.error || 'Login failed');
+        if (res.status === 429) {
+          const seconds = Number(data.retryAfter || 0);
+          const minutes = Math.max(1, Math.ceil(seconds / 60));
+          setError(`Too many attempts. Please try again in about ${minutes} minute(s).`);
+        } else {
+          setError(data.error || 'Login failed');
+        }
       }
     } catch (err) {
       handleError(err, setError);
