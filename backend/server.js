@@ -41,11 +41,15 @@ const pendingRematches = new Map(); // gameId -> Set(playerKey)
 const activeSeries = new Map(); // seriesId -> { players: [a,b], score: {a,b}, gamesPlayed }
 let federationExchangeCodes = new Map();
 const federationStatus = new Map(); // id -> { isActive: boolean, version: string, lastSeen: number }
+const adminLoginAttempts = new Map(); // ip -> { count, firstAttemptAt, blockedUntil }
 
 const authenticateAdmin = createAuthenticateAdmin(JWT_SECRET, jwt);
 
 const DEFAULT_RATING = 1200;
 const K_FACTOR = 24;
+const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const ADMIN_LOGIN_BLOCK_MS = 15 * 60 * 1000;
+const ADMIN_LOGIN_MAX_ATTEMPTS = 5;
 
 const normalizePlayerKey = (playerKey) => (playerKey && String(playerKey).trim() ? String(playerKey).trim() : null);
 
@@ -127,11 +131,36 @@ function buildLeaderboardRows(rows, sourceLabel) {
 }
 
 app.post('/api/admin/login', (req, res) => {
+  const now = Date.now();
+  for (const [key, entry] of adminLoginAttempts.entries()) {
+    const isExpiredBlock = entry.blockedUntil && entry.blockedUntil <= now;
+    const isExpiredWindow = !entry.blockedUntil && now - entry.firstAttemptAt > ADMIN_LOGIN_WINDOW_MS;
+    if (isExpiredBlock || isExpiredWindow) adminLoginAttempts.delete(key);
+  }
+
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const state = adminLoginAttempts.get(ip);
+  if (state?.blockedUntil && state.blockedUntil > now) {
+    const retryAfter = Math.ceil((state.blockedUntil - now) / 1000);
+    return res.status(429).json({ error: 'Too many login attempts. Try again later.', retryAfter });
+  }
+
   const { password } = req.body;
-  if (password === db.adminPassword) {
+  if (db.verifyAdminPassword(password)) {
+    adminLoginAttempts.delete(ip);
     const token = jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: '24h' });
     res.json({ token });
   } else {
+    if (!state || now - state.firstAttemptAt > ADMIN_LOGIN_WINDOW_MS) {
+      adminLoginAttempts.set(ip, { count: 1, firstAttemptAt: now, blockedUntil: null });
+    } else {
+      const nextCount = state.count + 1;
+      if (nextCount >= ADMIN_LOGIN_MAX_ATTEMPTS) {
+        adminLoginAttempts.set(ip, { count: nextCount, firstAttemptAt: state.firstAttemptAt, blockedUntil: now + ADMIN_LOGIN_BLOCK_MS });
+      } else {
+        adminLoginAttempts.set(ip, { count: nextCount, firstAttemptAt: state.firstAttemptAt, blockedUntil: null });
+      }
+    }
     res.status(401).json({ error: 'Invalid password' });
   }
 });
@@ -156,8 +185,13 @@ app.get('/api/admin/info', authenticateAdmin, (req, res) => {
 
 app.post('/api/admin/password', authenticateAdmin, (req, res) => {
   const { newPassword } = req.body;
-  if (!newPassword || newPassword.length < 4) {
-    return res.status(400).json({ error: 'Password must be at least 4 characters long' });
+  const strongEnough = typeof newPassword === 'string'
+    && newPassword.length >= 10
+    && /[A-Z]/.test(newPassword)
+    && /[a-z]/.test(newPassword)
+    && /[0-9]/.test(newPassword);
+  if (!strongEnough) {
+    return res.status(400).json({ error: 'Password must be at least 10 chars and include upper/lowercase letters and a number' });
   }
   db.updateAdminPassword(newPassword);
   res.json({ success: true });
@@ -318,6 +352,108 @@ app.post('/api/analyze/hint', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'analysis failed' });
   }
+});
+
+const evaluateFen = async (fen, level = 4) => new Promise((resolve, reject) => {
+  const enginePath = path.join(__dirname, 'node_modules', 'stockfish', 'bin', 'stockfish-18-single.js');
+  const engine = spawn('node', [enginePath]);
+  let done = false;
+  let buffer = '';
+  let currentCp = null;
+
+  const finish = (result, error = null) => {
+    if (done) return;
+    done = true;
+    engine.kill();
+    if (error) reject(error);
+    else resolve(result);
+  };
+
+  const timeout = setTimeout(() => finish(null, new Error('analysis timeout')), 3500);
+
+  engine.stdout.on('data', (data) => {
+    buffer += data.toString();
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (line.includes(' score cp ')) {
+        const m = line.match(/score cp (-?\d+)/);
+        if (m) currentCp = Number.parseInt(m[1], 10);
+      }
+      if (line.includes(' score mate ')) {
+        const m = line.match(/score mate (-?\d+)/);
+        if (m) {
+          const mateIn = Number.parseInt(m[1], 10);
+          currentCp = mateIn > 0 ? 10000 : -10000;
+        }
+      }
+      if (line.startsWith('bestmove')) {
+        clearTimeout(timeout);
+        const move = line.split(' ')[1];
+        finish({ cp: currentCp, bestmove: move });
+        return;
+      }
+    }
+  });
+
+  engine.stderr.on('data', () => {});
+  engine.on('error', (err) => {
+    clearTimeout(timeout);
+    finish(null, err);
+  });
+
+  engine.stdin.write('uci\n');
+  engine.stdin.write(`setoption name Skill Level value ${Math.max(1, Math.min(20, Number(level) * 2))}\n`);
+  engine.stdin.write(`position fen ${fen}\n`);
+  engine.stdin.write(`go depth ${Math.max(8, Math.min(14, Number(level) + 7))}\n`);
+});
+
+app.post('/api/analyze/replay', async (req, res) => {
+  const { pgn, maxPlies = 30, level = 4 } = req.body || {};
+  if (!pgn || typeof pgn !== 'string') return res.status(400).json({ error: 'pgn is required' });
+  const parsed = new Chess();
+  try {
+    parsed.loadPgn(pgn);
+  } catch (err) {
+    return res.status(400).json({ error: 'invalid pgn' });
+  }
+
+  const moves = parsed.history({ verbose: true });
+  const limit = Math.max(1, Math.min(Number(maxPlies) || 30, moves.length));
+  const marks = [];
+  const board = new Chess();
+  const evalCache = new Map();
+
+  const evaluateCached = async (fen) => {
+    if (evalCache.has(fen)) return evalCache.get(fen);
+    const evaluation = await evaluateFen(fen, level);
+    evalCache.set(fen, evaluation);
+    return evaluation;
+  };
+
+  for (let idx = 0; idx < limit; idx += 1) {
+    const beforeFen = board.fen();
+    const move = moves[idx];
+    board.move(move);
+    const afterFen = board.fen();
+    try {
+      const before = await evaluateCached(beforeFen);
+      const after = await evaluateCached(afterFen);
+      const cpBefore = Number.isFinite(before?.cp) ? before.cp : 0;
+      const cpAfter = Number.isFinite(after?.cp) ? after.cp : 0;
+      const afterFromMoverPerspective = -cpAfter;
+      const loss = Math.max(0, cpBefore - afterFromMoverPerspective);
+      let label = '';
+      if (loss >= 180) label = 'Blunder';
+      else if (loss >= 90) label = 'Mistake';
+      else if (loss >= 45) label = 'Inaccuracy';
+      marks.push({ idx, label, loss, bestmove: before?.bestmove || null });
+    } catch (err) {
+      marks.push({ idx, label: '', loss: 0, bestmove: null });
+    }
+  }
+
+  res.json({ marks, analyzedPlies: limit, totalPlies: moves.length });
 });
 
 // Heartbeat interval to check federation partners
@@ -1233,4 +1369,7 @@ function checkGameEnd(game, suppressFederationEvent = false) {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Instance ID: ${db.instanceId}`);
+  if (db.generatedAdminPassword && process.env.NODE_ENV !== 'production') {
+    console.log(`Initial admin password: ${db.generatedAdminPassword}`);
+  }
 });

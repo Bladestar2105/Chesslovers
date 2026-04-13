@@ -30,6 +30,8 @@ function Game({ socket, sessionId, deviceId }) {
   const [hintMove, setHintMove] = useState('');
   const [rematchPending, setRematchPending] = useState(false);
   const [seriesState, setSeriesState] = useState(null);
+  const [toastMessage, setToastMessage] = useState('');
+  const [confirmAction, setConfirmAction] = useState(null);
 
   const normalizeWinner = useCallback((winnerValue) => {
     if (winnerValue === 'white') return 'w';
@@ -120,16 +122,11 @@ function Game({ socket, sessionId, deviceId }) {
         message = t('Game Over') + `: ${reason}`;
       }
       
-      // Show result after a small delay to let the last move render
-      setTimeout(() => alert(message), 100);
+      setToastMessage(message);
     };
 
     const onDrawOffered = () => {
-      setTimeout(() => {
-        if (window.confirm(t('Opponent offered a draw. Accept?'))) {
-          socket.emit('accept_draw', { gameId: id, sessionId });
-        }
-      }, 100);
+      setConfirmAction('accept_draw');
     };
 
     const onError = (error) => {
@@ -219,7 +216,7 @@ function Game({ socket, sessionId, deviceId }) {
       setIllegalMoveCount(prev => {
         const nextCount = prev + 1;
         if (nextCount >= 2) {
-          alert(t('Illegal move'));
+          setToastMessage(t('Illegal move'));
           return 0; // reset after showing message
         }
         return nextCount;
@@ -254,14 +251,12 @@ function Game({ socket, sessionId, deviceId }) {
   };
 
   const handleResign = () => {
-    if (window.confirm(t('Are you sure you want to resign?'))) {
-      socket.emit('resign', { gameId: id, sessionId });
-    }
+    setConfirmAction('resign');
   };
 
   const handleDrawOffer = () => {
     socket.emit('offer_draw', { gameId: id, sessionId });
-    alert(t('Draw offer sent.'));
+    setToastMessage(t('Draw offer sent.'));
   };
 
   const handleRematch = () => {
@@ -289,6 +284,21 @@ function Game({ socket, sessionId, deviceId }) {
 
   const handleTakeback = () => {
     socket.emit('request_takeback', { gameId: id, sessionId });
+  };
+
+  useEffect(() => {
+    if (!toastMessage) return undefined;
+    const timeout = setTimeout(() => setToastMessage(''), 2600);
+    return () => clearTimeout(timeout);
+  }, [toastMessage]);
+
+  const executeConfirmAction = () => {
+    if (confirmAction === 'resign') {
+      socket.emit('resign', { gameId: id, sessionId });
+    } else if (confirmAction === 'accept_draw') {
+      socket.emit('accept_draw', { gameId: id, sessionId });
+    }
+    setConfirmAction(null);
   };
 
   // Timer effect
@@ -555,6 +565,36 @@ function Game({ socket, sessionId, deviceId }) {
               {t('Cancel')}
             </button>
           </div>
+        </div>
+      )}
+
+      {confirmAction && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="panel p-6 rounded shadow-lg max-w-sm w-full">
+            <p className="mb-4 font-semibold">
+              {confirmAction === 'resign' ? t('Are you sure you want to resign?') : t('Opponent offered a draw. Accept?')}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmAction(null)}
+                className="px-4 py-2 bg-gray-300 hover:bg-gray-400 dark:bg-gray-600 dark:hover:bg-gray-500 rounded"
+              >
+                {t('Cancel')}
+              </button>
+              <button
+                onClick={executeConfirmAction}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded bg-slate-900 text-white shadow-lg">
+          {toastMessage}
         </div>
       )}
     </div>
