@@ -127,7 +127,7 @@ function Game({ socket, sessionId, deviceId }) {
     const onDrawOffered = () => {
       setTimeout(() => {
         if (window.confirm(t('Opponent offered a draw. Accept?'))) {
-          socket.emit('accept_draw', { gameId: id });
+          socket.emit('accept_draw', { gameId: id, sessionId });
         }
       }, 100);
     };
@@ -317,7 +317,7 @@ function Game({ socket, sessionId, deviceId }) {
     }, 100);
 
     return () => clearInterval(interval);
-  }, [status, timeControl, lastMoveTime, waitingForOpponent, chess]);
+  }, [status, timeControl, lastMoveTime, waitingForOpponent, chess, socket, id, sessionId]);
 
   const formatTime = (seconds) => {
     if (seconds === null || seconds === undefined) return '';

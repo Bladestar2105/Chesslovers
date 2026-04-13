@@ -10,7 +10,12 @@ const jwtMock = {
   }
 };
 
-const { parseTimeControl, authenticateAdmin: createAuthenticateAdmin } = require('./utils');
+const {
+  parseTimeControl,
+  authenticateAdmin: createAuthenticateAdmin,
+  normalizeSessionId,
+  isSessionParticipant
+} = require('./utils');
 
 const JWT_SECRET = 'test-secret';
 const authenticateAdmin = createAuthenticateAdmin(JWT_SECRET, jwtMock);
@@ -49,6 +54,12 @@ try {
 
   assert.deepStrictEqual(parseTimeControl('120|30'), { base: 7200, inc: 30 });
   console.log('✓ 120|30');
+
+  assert.deepStrictEqual(parseTimeControl(undefined), { base: 600, inc: 0 });
+  console.log('✓ undefined defaults to 10|0');
+
+  assert.deepStrictEqual(parseTimeControl('bad|value'), { base: 600, inc: 0 });
+  console.log('✓ malformed value defaults safely');
 
   console.log('\nTesting authenticateAdmin middleware...');
 
@@ -109,6 +120,31 @@ try {
     assert.deepStrictEqual(res.jsonData, { error: 'Missing authorization header' });
     console.log('✓ Missing token after Bearer (401)');
   }
+
+  // Test case 6: Wrong auth scheme
+  {
+    const req = { headers: { authorization: 'Basic admin-token' } };
+    const res = mockRes();
+    let nextCalled = false;
+    authenticateAdmin(req, res, () => { nextCalled = true; });
+    assert.strictEqual(nextCalled, false);
+    assert.strictEqual(res.statusCode, 401);
+    assert.deepStrictEqual(res.jsonData, { error: 'Missing authorization header' });
+    console.log('✓ Wrong auth scheme is rejected (401)');
+  }
+
+
+  console.log('\nTesting session helpers...');
+
+  assert.strictEqual(normalizeSessionId('  abc  '), 'abc');
+  assert.strictEqual(normalizeSessionId(''), '');
+  assert.strictEqual(normalizeSessionId(undefined), '');
+  console.log('✓ normalizeSessionId trims and handles non-string values');
+
+  assert.strictEqual(isSessionParticipant({ white: 'w1', black: 'b1' }, ' w1 '), true);
+  assert.strictEqual(isSessionParticipant({ white: 'w1', black: 'b1' }, 'x1'), false);
+  assert.strictEqual(isSessionParticipant(null, 'w1'), false);
+  console.log('✓ isSessionParticipant validates membership with normalization');
 
   console.log('\nAll tests passed!');
 } catch (err) {

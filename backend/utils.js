@@ -1,15 +1,31 @@
+
+const normalizeSessionId = (sessionId) => (typeof sessionId === 'string' ? sessionId.trim() : '');
+
+const isSessionParticipant = (game, sessionId) => {
+  const normalizedSessionId = normalizeSessionId(sessionId);
+  return Boolean(game && normalizedSessionId && (game.white === normalizedSessionId || game.black === normalizedSessionId));
+};
+
 const parseTimeControl = (tc) => {
   if (tc === 'unlimited') return { base: null, inc: null };
-  const parts = tc.split('|');
-  return { base: parseInt(parts[0]) * 60, inc: parseInt(parts[1]) };
+
+  const safeTc = typeof tc === 'string' ? tc : '';
+  const [basePart = '', incPart = '0'] = safeTc.split('|');
+  const parsedBaseMinutes = Number.parseInt(basePart, 10);
+  const parsedIncrement = Number.parseInt(incPart, 10);
+
+  const baseMinutes = Number.isFinite(parsedBaseMinutes) && parsedBaseMinutes >= 0 ? parsedBaseMinutes : 10;
+  const increment = Number.isFinite(parsedIncrement) && parsedIncrement >= 0 ? parsedIncrement : 0;
+
+  return { base: baseMinutes * 60, inc: increment };
 };
 
 const authenticateAdmin = (jwtSecret, jwt) => (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'Missing authorization header' });
 
-  const token = authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Missing authorization header' });
+  const [scheme, token] = authHeader.split(' ');
+  if (scheme !== 'Bearer' || !token) return res.status(401).json({ error: 'Missing authorization header' });
 
   try {
     const payload = jwt.verify(token, jwtSecret);
@@ -25,5 +41,7 @@ const authenticateAdmin = (jwtSecret, jwt) => (req, res, next) => {
 
 module.exports = {
   parseTimeControl,
-  authenticateAdmin
+  authenticateAdmin,
+  normalizeSessionId,
+  isSessionParticipant
 };
