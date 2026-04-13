@@ -50,6 +50,12 @@ try {
   assert.deepStrictEqual(parseTimeControl('120|30'), { base: 7200, inc: 30 });
   console.log('✓ 120|30');
 
+  assert.deepStrictEqual(parseTimeControl(undefined), { base: 600, inc: 0 });
+  console.log('✓ undefined defaults to 10|0');
+
+  assert.deepStrictEqual(parseTimeControl('bad|value'), { base: 600, inc: 0 });
+  console.log('✓ malformed value defaults safely');
+
   console.log('\nTesting authenticateAdmin middleware...');
 
   // Test case 1: Missing authorization header
@@ -108,6 +114,18 @@ try {
     assert.strictEqual(res.statusCode, 401);
     assert.deepStrictEqual(res.jsonData, { error: 'Missing authorization header' });
     console.log('✓ Missing token after Bearer (401)');
+  }
+
+  // Test case 6: Wrong auth scheme
+  {
+    const req = { headers: { authorization: 'Basic admin-token' } };
+    const res = mockRes();
+    let nextCalled = false;
+    authenticateAdmin(req, res, () => { nextCalled = true; });
+    assert.strictEqual(nextCalled, false);
+    assert.strictEqual(res.statusCode, 401);
+    assert.deepStrictEqual(res.jsonData, { error: 'Missing authorization header' });
+    console.log('✓ Wrong auth scheme is rejected (401)');
   }
 
   console.log('\nAll tests passed!');

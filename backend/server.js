@@ -541,13 +541,21 @@ const sendStockfishCmd = (engine, cmd) => {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
+  const normalizeSessionId = (sessionId) => (typeof sessionId === 'string' ? sessionId.trim() : '');
+
+  const isSessionParticipant = (game, sessionId) => {
+    const normalizedSessionId = normalizeSessionId(sessionId);
+    return Boolean(game && normalizedSessionId && (game.white === normalizedSessionId || game.black === normalizedSessionId));
+  };
+
   // Resume a disconnected game
   socket.on('rejoin', ({ sessionId }) => {
     let rejoined = false;
     for (const [gameId, game] of activeGames.entries()) {
-      if (game.white === sessionId || game.black === sessionId) {
+      if (isSessionParticipant(game, sessionId)) {
         socket.join(gameId);
-        socket.emit('game_rejoined', { gameId, side: game.white === sessionId ? 'w' : 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), timeControl: game.timeControl });
+        const normalizedSessionId = normalizeSessionId(sessionId);
+        socket.emit('game_rejoined', { gameId, side: game.white === normalizedSessionId ? 'w' : 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), timeControl: game.timeControl });
         rejoined = true;
         break;
       }
@@ -558,6 +566,13 @@ io.on('connection', (socket) => {
   });
 
   socket.on('create_game', ({ isCpu, cpuLevel, timeControl, sessionId, customGameId, playerName, playerKey, learningMode = false, seriesId = null }) => {
+    const normalizedSessionId = normalizeSessionId(sessionId);
+    if (!normalizedSessionId) {
+      socket.emit('error', 'Invalid session');
+      return;
+    }
+
+    const safeCpuLevel = Math.max(1, Math.min(10, Number.parseInt(cpuLevel, 10) || 3));
     // Generate an 8-character ID if it's a friend game and no customGameId was provided
     // This makes it easy to share. Keep uuid for cpu games or random if desired.
     const gameId = customGameId ? customGameId : (isCpu ? uuidv4() : crypto.randomBytes(4).toString('hex'));
@@ -569,14 +584,14 @@ io.on('connection', (socket) => {
     const gameData = {
       id: gameId,
       chess,
-      white: sessionId,
+      white: normalizedSessionId,
       whiteName: playerName,
       whitePlayerKey: normalizePlayerKey(playerKey),
       black: isCpu ? 'cpu' : null,
       blackName: isCpu ? 'CPU' : null,
       blackPlayerKey: isCpu ? 'cpu' : null,
       isCpu,
-      cpuLevel,
+      cpuLevel: safeCpuLevel,
       learningMode: Boolean(learningMode),
       seriesId,
       timeControl,
@@ -593,8 +608,11 @@ io.on('connection', (socket) => {
       const enginePath = path.join(__dirname, 'node_modules', 'stockfish', 'bin', 'stockfish-18-single.js');
       const engine = spawn('node', [enginePath]);
       engine.stdin.write('uci\n');
-      engine.stdin.write(`setoption name Skill Level value ${cpuLevel * 2}\n`); // Scale 1-10 to 1-20
+      engine.stdin.write(`setoption name Skill Level value ${safeCpuLevel * 2}\n`); // Scale 1-10 to 1-20
       gameData.engine = engine;
+      engine.on('error', (err) => {
+        console.error('CPU engine failed to start', err.message);
+      });
 
       let buffer = '';
       engine.stdout.on('data', (data) => {
@@ -630,12 +648,12 @@ io.on('connection', (socket) => {
       pgn: chess.pgn(),
       status: 'active',
       timeControl,
-      white: sessionId,
+      white: normalizedSessionId,
       black: gameData.black,
       whitePlayerKey: gameData.whitePlayerKey,
       blackPlayerKey: gameData.blackPlayerKey,
       isCpu,
-      cpuLevel,
+      cpuLevel: safeCpuLevel,
       learningMode: gameData.learningMode
     });
 
@@ -643,6 +661,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join_friend_game', ({ gameId, timeControl, sessionId, playerName, playerKey }) => {
+    const normalizedSessionId = normalizeSessionId(sessionId);
+    if (!normalizedSessionId) {
+      socket.emit('error', 'Invalid session');
+      return;
+    }
+
     // Treat joining via explicit ID like creating or joining if exists
     const existing = activeGames.get(gameId);
     if (existing) {
@@ -657,7 +681,7 @@ io.on('connection', (socket) => {
        const gameData = {
          id: gameId,
          chess,
-         white: sessionId,
+         white: normalizedSessionId,
          whiteName: playerName,
          whitePlayerKey: normalizePlayerKey(playerKey),
          black: null,
@@ -676,7 +700,7 @@ io.on('connection', (socket) => {
          pgn: chess.pgn(),
          status: 'active',
          timeControl,
-         white: sessionId,
+         white: normalizedSessionId,
          black: null,
          whitePlayerKey: gameData.whitePlayerKey,
          blackPlayerKey: null,
@@ -687,6 +711,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join_game', ({ gameId, sessionId, playerName, playerKey }) => {
+    const normalizedSessionId = normalizeSessionId(sessionId);
+    if (!normalizedSessionId) {
+      socket.emit('error', 'Invalid session');
+      return;
+    }
+
     const game = activeGames.get(gameId);
     if (!game) {
       return socket.emit('error', 'Game not found');
@@ -694,7 +724,7 @@ io.on('connection', (socket) => {
 
     socket.join(gameId);
 
-    if (game.white === sessionId) {
+    if (game.white === normalizedSessionId) {
       socket.emit('game_joined', { gameId, side: 'w', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName, learningMode: game.learningMode, seriesState: game.seriesState || null });
       if (game.black) {
         socket.emit('player_joined', { message: 'Opponent is here', blackName: game.blackName, whiteName: game.whiteName });
@@ -702,7 +732,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (game.black === sessionId) {
+    if (game.black === normalizedSessionId) {
       socket.emit('game_joined', { gameId, side: 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName, learningMode: game.learningMode, seriesState: game.seriesState || null });
       return;
     }
@@ -711,7 +741,7 @@ io.on('connection', (socket) => {
       return socket.emit('error', 'Game is full');
     }
 
-    game.black = sessionId;
+    game.black = normalizedSessionId;
     if (playerName) {
       game.blackName = playerName;
     }
@@ -737,6 +767,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('find_random', async ({ timeControl, sessionId, playerName, playerKey }) => {
+    const normalizedSessionId = normalizeSessionId(sessionId);
+    if (!normalizedSessionId) {
+      socket.emit('error', 'Invalid session');
+      return;
+    }
+
     // Gather all possible targets: local queue + active, compatible federation links
     const targets = ['local'];
     const links = db.getFederationLinks();
@@ -759,7 +795,7 @@ io.on('connection', (socket) => {
       if (target === 'local') {
         let opponent = null;
         for (const p of matchmakingQueue.values()) {
-          if (p.timeControl === timeControl && p.sessionId !== sessionId) {
+          if (p.timeControl === timeControl && p.sessionId !== normalizedSessionId) {
             opponent = p;
             break;
           }
@@ -779,7 +815,7 @@ io.on('connection', (socket) => {
             white: opponent.sessionId,
             whiteName: opponent.playerName,
             whitePlayerKey: opponent.playerKey,
-            black: sessionId,
+            black: normalizedSessionId,
             blackName: playerName,
             blackPlayerKey: normalizePlayerKey(playerKey),
             isCpu: false,
@@ -821,7 +857,7 @@ io.on('connection', (socket) => {
           const response = await fetch(`${target.partner_url}/api/federation/matchmaking`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ timeControl, sessionId, playerName, playerKey: normalizePlayerKey(playerKey), initiatorInstanceId: db.instanceId }),
+            body: JSON.stringify({ timeControl, sessionId: normalizedSessionId, playerName, playerKey: normalizePlayerKey(playerKey), initiatorInstanceId: db.instanceId }),
             signal: controller.signal
           });
 
@@ -878,17 +914,18 @@ io.on('connection', (socket) => {
     }
 
     // Still no match across ANY target, wait locally
-    matchmakingQueue.set(socket.id, { socketId: socket.id, sessionId, timeControl, playerName, playerKey: normalizePlayerKey(playerKey) });
+    matchmakingQueue.set(socket.id, { socketId: socket.id, sessionId: normalizedSessionId, timeControl, playerName, playerKey: normalizePlayerKey(playerKey) });
     socket.emit('waiting_for_opponent');
   });
 
   socket.on('make_move', ({ gameId, move, sessionId }) => {
+    const normalizedSessionId = normalizeSessionId(sessionId);
     const game = activeGames.get(gameId);
-    if (!game) return;
+    if (!game || !normalizedSessionId || !isSessionParticipant(game, normalizedSessionId)) return;
 
     // Determine whose turn it is
     const turn = game.chess.turn() === 'w' ? game.white : game.black;
-    if (turn !== sessionId) {
+    if (turn !== normalizedSessionId) {
         return; // Not their turn
     }
 
@@ -904,6 +941,10 @@ io.on('connection', (socket) => {
 
         // If playing against CPU, trigger CPU move
         if (game.isCpu && game.status === 'active' && game.chess.turn() === 'b') {
+          if (!game.engine || !game.engine.stdin) {
+            socket.emit('error', 'CPU engine unavailable');
+            return;
+          }
           game.engine.stdin.write(`position fen ${game.chess.fen()}\n`);
           // Simple depth calculation based on level
           game.engine.stdin.write(`go depth ${game.cpuLevel + 2}\n`);
@@ -919,9 +960,10 @@ io.on('connection', (socket) => {
     const game = activeGames.get(gameId);
     if (!game) return;
 
-    if (game.white === sessionId || game.black === sessionId) {
+    if (isSessionParticipant(game, sessionId)) {
+        const normalizedSessionId = normalizeSessionId(sessionId);
         game.status = 'resign';
-        const winner = game.white === sessionId ? 'b' : 'w';
+        const winner = game.white === normalizedSessionId ? 'b' : 'w';
         game.resultWinner = winner;
         io.to(gameId).emit('game_over', { reason: 'resign', winner });
         saveAndRemoveGame(game);
@@ -932,18 +974,18 @@ io.on('connection', (socket) => {
 
   socket.on('offer_draw', ({ gameId, sessionId }) => {
       const game = activeGames.get(gameId);
-      if (!game) return;
-      if (game.isCpu) return; // Cannot draw with CPU simply
+      if (!game || game.isCpu) return; // Cannot draw with CPU simply
+      if (!isSessionParticipant(game, sessionId)) return;
 
-      // In a real app we'd map session to socket, for now just broadcast
       socket.to(gameId).emit('draw_offered');
 
       sendFederationEvent(game, 'offer_draw', {});
   });
 
-  socket.on('accept_draw', ({ gameId }) => {
+  socket.on('accept_draw', ({ gameId, sessionId }) => {
       const game = activeGames.get(gameId);
-      if (!game) return;
+      if (!game || !sessionId) return;
+      if (!isSessionParticipant(game, sessionId)) return;
       game.status = 'draw';
       game.resultWinner = null;
       io.to(gameId).emit('game_over', { reason: 'draw' });
@@ -952,9 +994,10 @@ io.on('connection', (socket) => {
       sendFederationEvent(game, 'accept_draw', {});
   });
 
-  socket.on('timeout', ({ gameId }) => {
+  socket.on('timeout', ({ gameId, sessionId }) => {
       const game = activeGames.get(gameId);
-      if (!game || game.status !== 'active' || game.timeControl === 'unlimited' || !game.lastMoveTime) return;
+      if (!game || !sessionId || game.status !== 'active' || game.timeControl === 'unlimited' || !game.lastMoveTime) return;
+      if (!isSessionParticipant(game, sessionId)) return;
 
       const now = Date.now();
       const elapsed = (now - game.lastMoveTime) / 1000;
