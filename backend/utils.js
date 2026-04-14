@@ -1,7 +1,11 @@
 const parseTimeControl = (tc) => {
-  if (tc === 'unlimited') return { base: null, inc: null };
+  if (tc === 'unlimited' || !tc || typeof tc !== 'string') return { base: null, inc: null };
   const parts = tc.split('|');
-  return { base: parseInt(parts[0]) * 60, inc: parseInt(parts[1]) };
+  if (parts.length !== 2) return { base: null, inc: null };
+  const base = parseInt(parts[0]);
+  const inc = parseInt(parts[1]);
+  if (isNaN(base) || isNaN(inc)) return { base: null, inc: null };
+  return { base: base * 60, inc: inc };
 };
 
 const authenticateAdmin = (jwtSecret, jwt) => (req, res, next) => {

@@ -50,6 +50,24 @@ try {
   assert.deepStrictEqual(parseTimeControl('120|30'), { base: 7200, inc: 30 });
   console.log('✓ 120|30');
 
+  assert.deepStrictEqual(parseTimeControl('10'), { base: null, inc: null });
+  console.log('✓ 10 (invalid format - missing |)');
+
+  assert.deepStrictEqual(parseTimeControl('abc|def'), { base: null, inc: null });
+  console.log('✓ abc|def (invalid parts)');
+
+  assert.deepStrictEqual(parseTimeControl('10|5|3'), { base: null, inc: null });
+  console.log('✓ 10|5|3 (invalid format - extra parts)');
+
+  assert.deepStrictEqual(parseTimeControl(''), { base: null, inc: null });
+  console.log('✓ "" (empty string)');
+
+  assert.deepStrictEqual(parseTimeControl(null), { base: null, inc: null });
+  console.log('✓ null');
+
+  assert.deepStrictEqual(parseTimeControl(undefined), { base: null, inc: null });
+  console.log('✓ undefined');
+
   console.log('\nTesting authenticateAdmin middleware...');
 
   // Test case 1: Missing authorization header
