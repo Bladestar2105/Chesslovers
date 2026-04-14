@@ -194,34 +194,17 @@ app.post('/api/admin/federation/sync', authenticateAdmin, async (req, res) => {
   const links = db.getFederationLinks();
 
   const results = await Promise.all(links.map(async (link) => {
-    let localSyncCount = 0;
     try {
       // Fetch replays from partner
       const response = await fetch(`${link.partner_url}/api/replays`);
       if (response.ok) {
         const games = await response.json();
-        for (const game of games) {
-          // Check if we already have it. If not, save.
-          const existing = db.getGame(game.id);
-          if (!existing) {
-            db.saveGame({
-              id: game.id,
-              pgn: game.pgn,
-              status: game.status,
-              timeControl: game.time_control,
-              white: game.white_player_id,
-              black: game.black_player_id,
-              isCpu: game.is_cpu === 1,
-              cpuLevel: game.cpu_level
-            });
-            localSyncCount++;
-          }
-        }
+        return db.saveGames(games);
       }
     } catch (e) {
       console.error(`Failed to sync with ${link.partner_url}`, e);
     }
-    return localSyncCount;
+    return 0;
   }));
 
   const totalSyncCount = results.reduce((acc, count) => acc + count, 0);

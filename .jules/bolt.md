@@ -9,3 +9,8 @@
 **Learning:** Using an `Array` for a matchmaking queue leads to O(N) deletion performance, which can become a bottleneck under high traffic. While `Array.from(map.values()).find()` is a functional equivalent for searching, it introduces O(N) space allocation on every call.
 
 **Action:** Use a `Map` keyed by a unique identifier (like `socketId`) to achieve O(1) deletion. For searching by other criteria (like `timeControl`), iterate over the map values using a `for...of` loop to maintain O(N) time complexity while avoiding unnecessary memory allocations.
+## 2026-04-13 - SQLite Batch Insert Performance
+
+**Learning:** SQLite wraps every individual write operation in an implicit transaction if one is not explicitly started. This causes a disk synchronization (fsync) per statement, which is a major performance bottleneck for high-volume operations like federation sync. Additionally, manual existence checks (SELECT before INSERT) double the query overhead.
+
+**Action:** Use explicit transactions via `db.transaction()` to batch multiple write operations into a single fsync. Leverage `INSERT OR IGNORE` to push existence checks into the database engine, reducing the total number of queries and eliminating N+1 patterns in the application code.
