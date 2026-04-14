@@ -234,5 +234,38 @@ module.exports = {
       ORDER BY rating DESC, games_played DESC, updated_at DESC
       LIMIT ?
     `).all(limit);
+  },
+  saveGames: (gamesData) => {
+    const insert = db.prepare(`
+      INSERT OR IGNORE INTO games (
+        id, pgn, status, time_control, white_player_id, black_player_id, white_player_key, black_player_key, is_cpu, cpu_level, learning_mode
+      )
+      VALUES (
+        @id, @pgn, @status, @time_control, @white_player_id, @black_player_id, @white_player_key, @black_player_key, @is_cpu, @cpu_level, @learning_mode
+      )
+    `);
+
+    const insertMany = db.transaction((games) => {
+      let count = 0;
+      for (const game of games) {
+        const result = insert.run(game);
+        count += result.changes;
+      }
+      return count;
+    });
+
+    return insertMany(gamesData.map(gameData => ({
+      id: gameData.id,
+      pgn: gameData.pgn || '',
+      status: gameData.status || 'active',
+      time_control: gameData.timeControl || gameData.time_control || 'standard',
+      white_player_id: gameData.white || gameData.white_player_id || null,
+      black_player_id: gameData.black || gameData.black_player_id || null,
+      white_player_key: gameData.whitePlayerKey || gameData.white_player_key || null,
+      black_player_key: gameData.blackPlayerKey || gameData.black_player_key || null,
+      is_cpu: (gameData.isCpu !== undefined ? gameData.isCpu : gameData.is_cpu) ? 1 : 0,
+      cpu_level: gameData.cpuLevel || gameData.cpu_level || 1,
+      learning_mode: (gameData.learningMode !== undefined ? gameData.learningMode : gameData.learning_mode) ? 1 : 0
+    })));
   }
 };
