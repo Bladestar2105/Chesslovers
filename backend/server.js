@@ -11,7 +11,7 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
 const pkg = require('./package.json');
-const { parseTimeControl, authenticateAdmin: createAuthenticateAdmin } = require('./utils');
+const { parseTimeControl, isValidTimeControl, isValidString, authenticateAdmin: createAuthenticateAdmin } = require('./utils');
 
 const app = express();
 app.use(cors());
@@ -455,6 +455,10 @@ function sendFederationEvent(game, event, data) {
 app.post('/api/federation/matchmaking', (req, res) => {
   const { timeControl, sessionId, playerName, playerKey, initiatorInstanceId } = req.body;
 
+  if (!isValidTimeControl(timeControl)) {
+    return res.status(400).json({ error: 'Invalid time control format' });
+  }
+
   if (!initiatorInstanceId || !db.getFederationLink(initiatorInstanceId)) {
     return res.status(401).json({ error: 'Unauthorized federation partner' });
   }
@@ -558,6 +562,13 @@ io.on('connection', (socket) => {
   });
 
   socket.on('create_game', ({ isCpu, cpuLevel, timeControl, sessionId, customGameId, playerName, playerKey, learningMode = false, seriesId = null }) => {
+    if (!isValidTimeControl(timeControl)) {
+      return socket.emit('error', 'Invalid time control format');
+    }
+    if (customGameId && !isValidString(customGameId, 100)) {
+      return socket.emit('error', 'Invalid custom game ID');
+    }
+
     // Generate an 8-character ID if it's a friend game and no customGameId was provided
     // This makes it easy to share. Keep uuid for cpu games or random if desired.
     const gameId = customGameId ? customGameId : (isCpu ? uuidv4() : crypto.randomBytes(4).toString('hex'));
@@ -643,6 +654,13 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join_friend_game', ({ gameId, timeControl, sessionId, playerName, playerKey }) => {
+    if (!isValidString(gameId, 100)) {
+      return socket.emit('error', 'Invalid game ID');
+    }
+    if (!isValidTimeControl(timeControl)) {
+      return socket.emit('error', 'Invalid time control format');
+    }
+
     // Treat joining via explicit ID like creating or joining if exists
     const existing = activeGames.get(gameId);
     if (existing) {
@@ -737,6 +755,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('find_random', async ({ timeControl, sessionId, playerName, playerKey }) => {
+    if (!isValidTimeControl(timeControl)) {
+      return socket.emit('error', 'Invalid time control format');
+    }
+
     // Gather all possible targets: local queue + active, compatible federation links
     const targets = ['local'];
     const links = db.getFederationLinks();

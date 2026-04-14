@@ -10,7 +10,7 @@ const jwtMock = {
   }
 };
 
-const { parseTimeControl, authenticateAdmin: createAuthenticateAdmin } = require('./utils');
+const { parseTimeControl, isValidTimeControl, isValidString, authenticateAdmin: createAuthenticateAdmin } = require('./utils');
 
 const JWT_SECRET = 'test-secret';
 const authenticateAdmin = createAuthenticateAdmin(JWT_SECRET, jwtMock);
@@ -49,6 +49,34 @@ try {
 
   assert.deepStrictEqual(parseTimeControl('120|30'), { base: 7200, inc: 30 });
   console.log('✓ 120|30');
+
+  console.log('\nTesting isValidTimeControl...');
+  assert.strictEqual(isValidTimeControl('unlimited'), true);
+  assert.strictEqual(isValidTimeControl('10|5'), true);
+  assert.strictEqual(isValidTimeControl('0|0'), true);
+  assert.strictEqual(isValidTimeControl('3|2'), true);
+  assert.strictEqual(isValidTimeControl('120|30'), true);
+  assert.strictEqual(isValidTimeControl('10|'), false);
+  assert.strictEqual(isValidTimeControl('|5'), false);
+  assert.strictEqual(isValidTimeControl('10'), false);
+  assert.strictEqual(isValidTimeControl('abc|def'), false);
+  assert.strictEqual(isValidTimeControl('10.5|5'), false);
+  assert.strictEqual(isValidTimeControl('10|5|0'), false);
+  assert.strictEqual(isValidTimeControl(null), false);
+  assert.strictEqual(isValidTimeControl({}), false);
+  assert.strictEqual(isValidTimeControl(123), false);
+  console.log('✓ isValidTimeControl tests passed');
+
+  console.log('\nTesting isValidString...');
+  assert.strictEqual(isValidString('hello'), true);
+  assert.strictEqual(isValidString(''), true);
+  assert.strictEqual(isValidString('a'.repeat(255)), true);
+  assert.strictEqual(isValidString('a'.repeat(256)), false);
+  assert.strictEqual(isValidString('hello', 5), true);
+  assert.strictEqual(isValidString('hello', 4), false);
+  assert.strictEqual(isValidString(null), false);
+  assert.strictEqual(isValidString({}), false);
+  console.log('✓ isValidString tests passed');
 
   console.log('\nTesting authenticateAdmin middleware...');
 
