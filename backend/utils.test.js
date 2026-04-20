@@ -14,7 +14,8 @@ const {
   parseTimeControl,
   authenticateAdmin: createAuthenticateAdmin,
   normalizeSessionId,
-  isSessionParticipant
+  isSessionParticipant,
+  buildLeaderboardRows
 } = require('./utils');
 
 const JWT_SECRET = 'test-secret';
@@ -145,6 +146,49 @@ try {
   assert.strictEqual(isSessionParticipant({ white: 'w1', black: 'b1' }, 'x1'), false);
   assert.strictEqual(isSessionParticipant(null, 'w1'), false);
   console.log('✓ isSessionParticipant validates membership with normalization');
+
+
+  console.log('\nTesting buildLeaderboardRows...');
+
+  // Test case 1: Normal rows
+  {
+    const rows = [
+      { player_key: 'p1', display_name: 'Player 1', rating: 1500, games_played: 10, wins: 5, draws: 2, losses: 3 },
+      { player_key: 'p2', display_name: 'Player 2', rating: 1400, games_played: 8, wins: 4, draws: 1, losses: 3 }
+    ];
+    const sourceLabel = 'local';
+    const result = buildLeaderboardRows(rows, sourceLabel);
+    assert.strictEqual(result.length, 2);
+    assert.deepStrictEqual(result[0], {
+      playerKey: 'p1',
+      name: 'Player 1',
+      rating: 1500,
+      gamesPlayed: 10,
+      wins: 5,
+      draws: 2,
+      losses: 3,
+      source: 'local'
+    });
+    console.log('✓ Normal rows');
+  }
+
+  // Test case 2: Missing display_name
+  {
+    const rows = [
+      { player_key: 'p3', display_name: null, rating: 1200, games_played: 5, wins: 2, draws: 1, losses: 2 }
+    ];
+    const result = buildLeaderboardRows(rows, 'remote');
+    assert.strictEqual(result[0].name, 'Anonymous');
+    console.log('✓ Missing display_name defaults to Anonymous');
+  }
+
+  // Test case 3: Empty rows
+  {
+    const result = buildLeaderboardRows([], 'local');
+    assert.strictEqual(result.length, 0);
+    console.log('✓ Empty rows');
+  }
+
 
   console.log('\nAll tests passed!');
 } catch (err) {
