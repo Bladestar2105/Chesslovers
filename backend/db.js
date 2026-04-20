@@ -102,8 +102,8 @@ let adminPasswordRow = db.prepare('SELECT value FROM config WHERE key = ?').get(
 let generatedAdminPassword = null;
 if (!adminPasswordRow) {
   const envPassword = process.env.ADMIN_PASSWORD && String(process.env.ADMIN_PASSWORD).trim();
-  // Generate a random 12 character password (base64 of 9 bytes is exactly 12 chars)
-  const newAdminPassword = envPassword || crypto.randomBytes(9).toString('base64').replace(/\+/g, '8').replace(/\//g, '9');
+  // Generate a random 32-byte password (base64 encoded)
+  const newAdminPassword = envPassword || crypto.randomBytes(32).toString('base64');
   const hashedAdminPassword = hashPassword(newAdminPassword);
   db.prepare('INSERT INTO config (key, value) VALUES (?, ?)').run('admin_password', hashedAdminPassword);
   generatedAdminPassword = envPassword ? null : newAdminPassword;
