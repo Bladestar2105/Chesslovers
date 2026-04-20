@@ -15,7 +15,8 @@ const {
   parseTimeControl,
   authenticateAdmin: createAuthenticateAdmin,
   normalizeSessionId,
-  isSessionParticipant
+  isSessionParticipant,
+  buildLeaderboardRows
 } = require('./utils');
 
 const app = express();
@@ -115,19 +116,6 @@ function updateRatingsForGame(game) {
     draws: black.draws + (blackScore === 0.5 ? 1 : 0),
     losses: black.losses + (blackScore === 0 ? 1 : 0)
   });
-}
-
-function buildLeaderboardRows(rows, sourceLabel) {
-  return rows.map((row) => ({
-    playerKey: row.player_key,
-    name: row.display_name || 'Anonymous',
-    rating: row.rating,
-    gamesPlayed: row.games_played,
-    wins: row.wins,
-    draws: row.draws,
-    losses: row.losses,
-    source: sourceLabel
-  }));
 }
 
 app.post('/api/admin/login', (req, res) => {

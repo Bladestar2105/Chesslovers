@@ -6,6 +6,17 @@ const isSessionParticipant = (game, sessionId) => {
   return Boolean(game && normalizedSessionId && (game.white === normalizedSessionId || game.black === normalizedSessionId));
 };
 
+const buildLeaderboardRows = (rows, sourceLabel) => rows.map((row) => ({
+    playerKey: row.player_key,
+    name: row.display_name || 'Anonymous',
+    rating: row.rating,
+    gamesPlayed: row.games_played,
+    wins: row.wins,
+    draws: row.draws,
+    losses: row.losses,
+    source: sourceLabel
+  }));
+
 const parseTimeControl = (tc) => {
   if (tc === 'unlimited') return { base: null, inc: null };
 
@@ -43,5 +54,6 @@ module.exports = {
   parseTimeControl,
   authenticateAdmin,
   normalizeSessionId,
-  isSessionParticipant
+  isSessionParticipant,
+  buildLeaderboardRows
 };
