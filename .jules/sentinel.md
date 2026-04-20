@@ -1,7 +1,8 @@
-## YYYY-MM-DD - [Title]
-**Vulnerability:** [What you found]
-**Learning:** [Why it existed]
-**Prevention:** [How to avoid next time]
+## 2024-06-07 - Weak Default Admin Password Generation
+**Vulnerability:** The default admin password was generated using only 9 bytes of entropy and simplified with character replacements, resulting in a predictable 12-character string.
+**Learning:** Low entropy and character substitutions in generated secrets significantly reduce the search space for brute-force attacks.
+**Prevention:** Use at least 32 bytes of cryptographically secure entropy (`crypto.randomBytes(32)`) for auto-generated passwords and avoid simplifying the character set unless strictly necessary for the transport layer.
+
 ## 2026-04-05 - Admin Password Exposed in Logs
 **Vulnerability:** The admin password was being printed to the console on server startup in `backend/server.js`.
 **Learning:** Logging sensitive information like passwords or secrets to standard output or log files creates a security risk, as these logs can be accessed by unauthorized individuals or systems.
