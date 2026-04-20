@@ -896,17 +896,20 @@ io.on('connection', (socket) => {
       [targets[i], targets[j]] = [targets[j], targets[i]];
     }
 
+    // Pre-calculate local opponent to avoid nested loop
+    let localOpponent = null;
+    for (const p of matchmakingQueue.values()) {
+      if (p.timeControl === timeControl && p.sessionId !== normalizedSessionId) {
+        localOpponent = p;
+        break;
+      }
+    }
+
     for (const target of targets) {
       if (target === 'local') {
-        let opponent = null;
-        for (const p of matchmakingQueue.values()) {
-          if (p.timeControl === timeControl && p.sessionId !== normalizedSessionId) {
-            opponent = p;
-            break;
-          }
-        }
+        let opponent = localOpponent;
 
-        if (opponent) {
+        if (opponent && matchmakingQueue.has(opponent.socketId)) {
           // Remove from queue
           matchmakingQueue.delete(opponent.socketId);
 
