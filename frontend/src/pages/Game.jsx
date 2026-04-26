@@ -175,7 +175,7 @@ function Game({ socket, sessionId, deviceId }) {
     return possibleMoves.some(m => m.from === from && m.to === to && m.promotion);
   }, [chess]);
 
-  const onDrop = (sourceSquare, targetSquare, piece) => {
+  const onDrop = (sourceSquare, targetSquare) => {
     if (status !== 'active') {
       return false;
     }
