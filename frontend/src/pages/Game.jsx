@@ -176,15 +176,11 @@ function Game({ socket, sessionId, deviceId }) {
   }, [chess]);
 
   const onDrop = (sourceSquare, targetSquare, piece) => {
-    console.log('onDrop called:', { sourceSquare, targetSquare, piece, turn: chess.turn(), side, status });
-    
     if (status !== 'active') {
-      console.log('Game not active');
       return false;
     }
     
     if (chess.turn() !== side) {
-      console.log('Not your turn');
       return false;
     }
 
@@ -202,7 +198,6 @@ function Game({ socket, sessionId, deviceId }) {
 
     try {
       const result = chess.move(move);
-      console.log('Move result:', result);
 
       if (result) {
         setFen(chess.fen());
