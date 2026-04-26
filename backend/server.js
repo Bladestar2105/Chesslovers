@@ -44,13 +44,23 @@ let federationExchangeCodes = new Map();
 const federationStatus = new Map(); // id -> { isActive: boolean, version: string, lastSeen: number }
 const adminLoginAttempts = new Map(); // ip -> { count, firstAttemptAt, blockedUntil }
 
-const authenticateAdmin = createAuthenticateAdmin(JWT_SECRET, jwt);
-
 const DEFAULT_RATING = 1200;
 const K_FACTOR = 24;
 const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const ADMIN_LOGIN_BLOCK_MS = 15 * 60 * 1000;
 const ADMIN_LOGIN_MAX_ATTEMPTS = 5;
+
+// Periodic cleanup of expired admin login attempts
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of adminLoginAttempts.entries()) {
+    const isExpiredBlock = entry.blockedUntil && entry.blockedUntil <= now;
+    const isExpiredWindow = !entry.blockedUntil && now - entry.firstAttemptAt > ADMIN_LOGIN_WINDOW_MS;
+    if (isExpiredBlock || isExpiredWindow) adminLoginAttempts.delete(key);
+  }
+}, 60 * 1000); // Clean up every minute
+
+const authenticateAdmin = createAuthenticateAdmin(JWT_SECRET, jwt);
 
 const normalizePlayerKey = (playerKey) => (playerKey && String(playerKey).trim() ? String(playerKey).trim() : null);
 
@@ -120,14 +130,19 @@ function updateRatingsForGame(game) {
 
 app.post('/api/admin/login', (req, res) => {
   const now = Date.now();
-  for (const [key, entry] of adminLoginAttempts.entries()) {
-    const isExpiredBlock = entry.blockedUntil && entry.blockedUntil <= now;
-    const isExpiredWindow = !entry.blockedUntil && now - entry.firstAttemptAt > ADMIN_LOGIN_WINDOW_MS;
-    if (isExpiredBlock || isExpiredWindow) adminLoginAttempts.delete(key);
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  let state = adminLoginAttempts.get(ip);
+
+  // O(1) check for the current IP to ensure immediate reset if expired
+  if (state) {
+    const isExpiredBlock = state.blockedUntil && state.blockedUntil <= now;
+    const isExpiredWindow = !state.blockedUntil && now - state.firstAttemptAt > ADMIN_LOGIN_WINDOW_MS;
+    if (isExpiredBlock || isExpiredWindow) {
+      adminLoginAttempts.delete(ip);
+      state = undefined;
+    }
   }
 
-  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-  const state = adminLoginAttempts.get(ip);
   if (state?.blockedUntil && state.blockedUntil > now) {
     const retryAfter = Math.ceil((state.blockedUntil - now) / 1000);
     return res.status(429).json({ error: 'Too many login attempts. Try again later.', retryAfter });
