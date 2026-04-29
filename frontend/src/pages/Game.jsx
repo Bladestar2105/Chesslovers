@@ -219,6 +219,7 @@ function Game({ socket, sessionId, deviceId }) {
       }
     } catch (e) {
       console.error("Move error:", e.message);
+      socket.emit('client_metric', { sessionId, name: 'invalid_move' });
       setIllegalMoveCount(prev => {
         const nextCount = prev + 1;
         if (nextCount >= 2) {
@@ -243,6 +244,7 @@ function Game({ socket, sessionId, deviceId }) {
         }
       } catch (e) {
         console.error("Promotion failed", e);
+        socket.emit('client_metric', { sessionId, name: 'invalid_move' });
         setFen(chess.fen());
       }
     }
