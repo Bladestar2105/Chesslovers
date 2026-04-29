@@ -683,7 +683,16 @@ io.on('connection', (socket) => {
       if (isSessionParticipant(game, sessionId)) {
         socket.join(gameId);
         const normalizedSessionId = normalizeSessionId(sessionId);
-        socket.emit('game_rejoined', { gameId, side: game.white === normalizedSessionId ? 'w' : 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), timeControl: game.timeControl });
+        const side = game.white === normalizedSessionId ? 'w' : 'b';
+
+        if (side === 'w') {
+          game.whiteSocketId = socket.id;
+        } else {
+          game.blackSocketId = socket.id;
+        }
+
+        socket.emit('game_rejoined', { gameId, side, fen: game.chess.fen(), pgn: game.chess.pgn(), timeControl: game.timeControl });
+        emitOpponentPresence(gameId, game);
         rejoined = true;
         break;
       }
