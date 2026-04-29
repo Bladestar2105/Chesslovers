@@ -348,19 +348,33 @@ function Game({ socket, sessionId, deviceId }) {
   const customSquareStyles = useMemo(() => {
     // using 'fen' here to trigger recalculation, since 'chess' object instance is mutated
     const currentFen = fen;
-    if (currentFen && isInCheck && status === 'active') {
-      const turn = chess.turn();
-      const kingSquare = chess.board().flat().find(p => p && p.type === 'k' && p.color === turn);
-      if (kingSquare) {
-        return {
-          [kingSquare.square]: {
-            backgroundColor: 'rgba(255, 0, 0, 0.5)',
-            borderRadius: '50%'
-          }
-        };
+    if (!currentFen || !isInCheck || status !== 'active') return {};
+
+    const turn = chess.turn();
+    const board = chess.board();
+    let kingSquare = null;
+
+    for (let row = 0; row < board.length; row += 1) {
+      for (let col = 0; col < board[row].length; col += 1) {
+        const piece = board[row][col];
+        if (piece && piece.type === 'k' && piece.color === turn) {
+          const file = String.fromCharCode('a'.charCodeAt(0) + col);
+          const rank = String(8 - row);
+          kingSquare = `${file}${rank}`;
+          break;
+        }
       }
+      if (kingSquare) break;
     }
-    return {};
+
+    if (!kingSquare) return {};
+
+    return {
+      [kingSquare]: {
+        backgroundColor: 'rgba(255, 0, 0, 0.5)',
+        borderRadius: '50%'
+      }
+    };
   }, [isInCheck, fen, status, chess]);
 
   // Format move for display
