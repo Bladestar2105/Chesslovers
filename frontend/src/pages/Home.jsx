@@ -73,6 +73,7 @@ function Home({ socket, sessionId, deviceId }) {
                 aria-pressed={mode === m}
                 className={`flex-1 py-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${mode === m ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'}`}
                 onClick={() => setMode(m)}
+                data-testid={`mode-${m}`}
               >
                 {m === 'cpu' ? t('Play vs CPU') : m === 'random' ? t('Play Random') : t('Play a Friend')}
               </button>
@@ -157,6 +158,7 @@ function Home({ socket, sessionId, deviceId }) {
         </div>
 
         <button
+          data-testid="start-game-button"
           onClick={handleStart}
           disabled={waiting}
           className="w-full py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-green-500 dark:focus-visible:ring-offset-[var(--panel-bg)]"
