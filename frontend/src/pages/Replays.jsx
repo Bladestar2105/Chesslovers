@@ -96,6 +96,58 @@ function Replays() {
     return marks;
   };
 
+
+
+  const sanitizeFilenamePart = (value, fallback) => {
+    const cleaned = (value || '')
+      .toString()
+      .normalize('NFKD')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase();
+    return cleaned || fallback;
+  };
+
+  const detectResultFromPgn = (pgn) => {
+    const text = (pgn || '').trim();
+    const resultMatch = text.match(/(1-0|0-1|1\/2-1\/2|\*)\s*$/);
+    return resultMatch ? resultMatch[1] : '*';
+  };
+
+  const ensureMinimalPgnHeaders = (pgn) => {
+    const text = (pgn || '').trim();
+    if (!text) return '';
+    const hasHeaders = /^\s*\[[^\]]+\]\s*$/m.test(text);
+    if (hasHeaders) return text;
+
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '.');
+    const result = detectResultFromPgn(text);
+    const minimalHeaders = [
+      '[Event "Imported game"]',
+      '[Site "?"]',
+      `[Date "${today}"]`,
+      '[Round "?"]',
+      '[White "White"]',
+      '[Black "Black"]',
+      `[Result "${result}"]`
+    ];
+    return `${minimalHeaders.join('\n')}\n\n${text}`;
+  };
+
+  const buildPgnFilename = (pgn) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const result = detectResultFromPgn(pgn);
+    const statusMap = {
+      '1-0': 'white-won',
+      '0-1': 'black-won',
+      '1/2-1/2': 'draw',
+      '*': 'unfinished'
+    };
+    const status = sanitizeFilenamePart(statusMap[result] || result, 'unknown');
+    return `replay-${today}-${status}.pgn`;
+  };
+
   const importPgn = () => {
     viewReplay(pgnInput);
   };
@@ -108,11 +160,14 @@ function Replays() {
 
   const exportPgn = () => {
     if (!selectedPgn) return;
-    const blob = new Blob([selectedPgn], { type: 'text/plain;charset=utf-8' });
+    const exportablePgn = ensureMinimalPgnHeaders(selectedPgn);
+    if (!exportablePgn) return;
+
+    const blob = new Blob([exportablePgn], { type: 'application/x-chess-pgn;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `replay-${Date.now()}.pgn`;
+    a.download = buildPgnFilename(exportablePgn);
     a.click();
     URL.revokeObjectURL(url);
   };
