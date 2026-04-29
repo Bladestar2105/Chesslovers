@@ -50,6 +50,7 @@ const K_FACTOR = 24;
 const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const ADMIN_LOGIN_BLOCK_MS = 15 * 60 * 1000;
 const ADMIN_LOGIN_MAX_ATTEMPTS = 5;
+const INVALID_MOVE_METRIC_MAX_SESSIONS = 10000;
 
 // Periodic cleanup of expired admin login attempts
 setInterval(() => {
@@ -127,6 +128,22 @@ function updateRatingsForGame(game) {
     draws: black.draws + (blackScore === 0.5 ? 1 : 0),
     losses: black.losses + (blackScore === 0 ? 1 : 0)
   });
+}
+
+function registerSocketSession(socket, normalizedSessionId) {
+  if (!normalizedSessionId) return;
+  if (!socket.data.sessionIds) socket.data.sessionIds = new Set();
+  socket.data.sessionIds.add(normalizedSessionId);
+}
+
+function socketOwnsSession(socket, normalizedSessionId) {
+  return Boolean(normalizedSessionId && socket.data.sessionIds && socket.data.sessionIds.has(normalizedSessionId));
+}
+
+function incrementInvalidMoveMetric(normalizedSessionId) {
+  if (!normalizedSessionId) return;
+  if (!invalidMoveMetrics.has(normalizedSessionId) && invalidMoveMetrics.size >= INVALID_MOVE_METRIC_MAX_SESSIONS) return;
+  invalidMoveMetrics.set(normalizedSessionId, (invalidMoveMetrics.get(normalizedSessionId) || 0) + 1);
 }
 
 app.post('/api/admin/login', (req, res) => {
@@ -679,9 +696,11 @@ const sendStockfishCmd = (engine, cmd) => {
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
+  socket.data.sessionIds = new Set();
 
   // Resume a disconnected game
   socket.on('rejoin', ({ sessionId }) => {
+    registerSocketSession(socket, normalizeSessionId(sessionId));
     let rejoined = false;
     for (const [gameId, game] of activeGames.entries()) {
       if (isSessionParticipant(game, sessionId)) {
@@ -703,6 +722,7 @@ io.on('connection', (socket) => {
       socket.emit('error', 'Invalid session');
       return;
     }
+    registerSocketSession(socket, normalizedSessionId);
 
     const safeCpuLevel = Math.max(1, Math.min(10, Number.parseInt(cpuLevel, 10) || 3));
     // Generate an 8-character ID if it's a friend game and no customGameId was provided
@@ -798,6 +818,7 @@ io.on('connection', (socket) => {
       socket.emit('error', 'Invalid session');
       return;
     }
+    registerSocketSession(socket, normalizedSessionId);
 
     // Treat joining via explicit ID like creating or joining if exists
     const existing = activeGames.get(gameId);
@@ -848,6 +869,7 @@ io.on('connection', (socket) => {
       socket.emit('error', 'Invalid session');
       return;
     }
+    registerSocketSession(socket, normalizedSessionId);
 
     const game = activeGames.get(gameId);
     if (!game) {
@@ -904,6 +926,7 @@ io.on('connection', (socket) => {
       socket.emit('error', 'Invalid session');
       return;
     }
+    registerSocketSession(socket, normalizedSessionId);
 
     // Gather all possible targets: local queue + active, compatible federation links
     const targets = ['local'];
@@ -1055,6 +1078,7 @@ io.on('connection', (socket) => {
 
   socket.on('make_move', ({ gameId, move, sessionId }) => {
     const normalizedSessionId = normalizeSessionId(sessionId);
+    registerSocketSession(socket, normalizedSessionId);
     const game = activeGames.get(gameId);
     if (!game || !normalizedSessionId || !isSessionParticipant(game, normalizedSessionId)) return;
 
@@ -1087,15 +1111,15 @@ io.on('connection', (socket) => {
       }
     } catch (e) {
       // Invalid move
-      invalidMoveMetrics.set(normalizedSessionId, (invalidMoveMetrics.get(normalizedSessionId) || 0) + 1);
+      incrementInvalidMoveMetric(normalizedSessionId);
       socket.emit('error', 'Invalid move');
     }
   });
 
   socket.on('client_metric', ({ sessionId, name }) => {
     const normalizedSessionId = normalizeSessionId(sessionId);
-    if (!normalizedSessionId || name !== 'invalid_move') return;
-    invalidMoveMetrics.set(normalizedSessionId, (invalidMoveMetrics.get(normalizedSessionId) || 0) + 1);
+    if (name !== 'invalid_move' || !socketOwnsSession(socket, normalizedSessionId)) return;
+    incrementInvalidMoveMetric(normalizedSessionId);
   });
 
   socket.on('resign', ({ gameId, sessionId }) => {
