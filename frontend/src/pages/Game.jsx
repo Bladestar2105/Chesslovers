@@ -26,6 +26,8 @@ function Game({ socket, sessionId, deviceId }) {
   const [timeControl, setTimeControl] = useState('unlimited');
   const [whiteName, setWhiteName] = useState('');
   const [blackName, setBlackName] = useState('');
+  const [whiteOnline, setWhiteOnline] = useState(false);
+  const [blackOnline, setBlackOnline] = useState(false);
   const [learningMode, setLearningMode] = useState(false);
   const [hintMove, setHintMove] = useState('');
   const [rematchPending, setRematchPending] = useState(false);
@@ -71,6 +73,10 @@ function Game({ socket, sessionId, deviceId }) {
       setSeriesState(data.seriesState || null);
       if (data.whiteName) setWhiteName(data.whiteName);
       if (data.blackName) setBlackName(data.blackName);
+      if (data.isCpu) {
+        setWhiteOnline(false);
+        setBlackOnline(false);
+      }
 
       const hasOpponentPresence = Boolean(
         data.black ||
@@ -110,6 +116,10 @@ function Game({ socket, sessionId, deviceId }) {
       
       // Update move history
       setMoveHistory(chess.history({ verbose: true }));
+    };
+    const onOpponentPresence = ({ whiteOnline: whiteConnected, blackOnline: blackConnected }) => {
+      setWhiteOnline(Boolean(whiteConnected));
+      setBlackOnline(Boolean(blackConnected));
     };
 
     const onGameOver = ({ reason, winner }) => {
@@ -160,6 +170,7 @@ function Game({ socket, sessionId, deviceId }) {
     socket.on('error', onError);
     socket.on('rematch_started', onRematchStarted);
     socket.on('rematch_waiting', onRematchWaiting);
+    socket.on('opponent_presence', onOpponentPresence);
 
     return () => {
       socket.off('game_joined', onGameJoined);
@@ -170,6 +181,7 @@ function Game({ socket, sessionId, deviceId }) {
       socket.off('error', onError);
       socket.off('rematch_started', onRematchStarted);
       socket.off('rematch_waiting', onRematchWaiting);
+      socket.off('opponent_presence', onOpponentPresence);
     };
   }, [socket, id, sessionId, chess, side, t, deviceId, normalizeWinner]);
 
@@ -354,6 +366,7 @@ function Game({ socket, sessionId, deviceId }) {
 
   const myTime = side === 'w' ? whiteTime : blackTime;
   const oppTime = side === 'w' ? blackTime : whiteTime;
+  const opponentOnline = side === 'w' ? blackOnline : whiteOnline;
 
   // Get custom square styles for check highlight
   const customSquareStyles = useMemo(() => {
@@ -409,6 +422,11 @@ function Game({ socket, sessionId, deviceId }) {
           <div>
             <div className="text-lg font-bold">
               {waitingForOpponent ? t('Waiting for opponent...') : (isCpu ? 'CPU' : ((side === 'w' ? blackName : whiteName) || t('Opponent')))}
+              {!isCpu && !waitingForOpponent && (
+                <span className={`ml-2 text-xs px-2 py-1 rounded-full align-middle ${opponentOnline ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' : 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200'}`}>
+                  {opponentOnline ? 'online' : 'reconnecting…'}
+                </span>
+              )}
               {isInCheck && chess.turn() !== side && status === 'active' && (
                 <span className="ml-2 text-red-500 font-bold">{t('CHECK!')}</span>
               )}

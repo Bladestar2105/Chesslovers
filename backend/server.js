@@ -694,6 +694,14 @@ const sendStockfishCmd = (engine, cmd) => {
   engine.postMessage(cmd);
 };
 
+const emitOpponentPresence = (gameId, game) => {
+  if (!game || game.isCpu) return;
+  io.to(gameId).emit('opponent_presence', {
+    whiteOnline: Boolean(game.whiteSocketId),
+    blackOnline: Boolean(game.blackSocketId)
+  });
+};
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
   socket.data.sessionIds = new Set();
@@ -706,7 +714,16 @@ io.on('connection', (socket) => {
       if (isSessionParticipant(game, sessionId)) {
         socket.join(gameId);
         const normalizedSessionId = normalizeSessionId(sessionId);
-        socket.emit('game_rejoined', { gameId, side: game.white === normalizedSessionId ? 'w' : 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), timeControl: game.timeControl });
+        const side = game.white === normalizedSessionId ? 'w' : 'b';
+
+        if (side === 'w') {
+          game.whiteSocketId = socket.id;
+        } else {
+          game.blackSocketId = socket.id;
+        }
+
+        socket.emit('game_rejoined', { gameId, side, fen: game.chess.fen(), pgn: game.chess.pgn(), timeControl: game.timeControl });
+        emitOpponentPresence(gameId, game);
         rejoined = true;
         break;
       }
@@ -755,6 +772,7 @@ io.on('connection', (socket) => {
 
     activeGames.set(gameId, gameData);
     socket.join(gameId);
+    gameData.whiteSocketId = socket.id;
 
     if (isCpu) {
       const enginePath = path.join(__dirname, 'node_modules', 'stockfish', 'bin', 'stockfish-18-single.js');
@@ -848,6 +866,7 @@ io.on('connection', (socket) => {
        };
        activeGames.set(gameId, gameData);
        socket.join(gameId);
+       gameData.whiteSocketId = socket.id;
        db.saveGame({
          id: gameId,
          pgn: chess.pgn(),
@@ -879,15 +898,19 @@ io.on('connection', (socket) => {
     socket.join(gameId);
 
     if (game.white === normalizedSessionId) {
+      game.whiteSocketId = socket.id;
       socket.emit('game_joined', { gameId, side: 'w', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName, learningMode: game.learningMode, seriesState: game.seriesState || null });
       if (game.black) {
         socket.emit('player_joined', { message: 'Opponent is here', blackName: game.blackName, whiteName: game.whiteName });
       }
+      emitOpponentPresence(gameId, game);
       return;
     }
 
     if (game.black === normalizedSessionId) {
+      game.blackSocketId = socket.id;
       socket.emit('game_joined', { gameId, side: 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName, learningMode: game.learningMode, seriesState: game.seriesState || null });
+      emitOpponentPresence(gameId, game);
       return;
     }
 
@@ -900,11 +923,13 @@ io.on('connection', (socket) => {
       game.blackName = playerName;
     }
     game.blackPlayerKey = normalizePlayerKey(playerKey);
+    game.blackSocketId = socket.id;
 
     // Ensure timer doesn't start until the first move is made
     game.lastMoveTime = null;
     socket.emit('game_joined', { gameId, side: 'b', fen: game.chess.fen(), pgn: game.chess.pgn(), isCpu: game.isCpu, timeControl: game.timeControl, whiteTime: game.whiteTime, blackTime: game.blackTime, lastMoveTime: game.lastMoveTime, whiteName: game.whiteName, blackName: game.blackName, learningMode: game.learningMode, seriesState: game.seriesState || null });
     io.to(gameId).emit('player_joined', { message: 'Black has joined', blackName: game.blackName, whiteName: game.whiteName });
+    emitOpponentPresence(gameId, game);
 
     db.saveGame({
         id: game.id,
@@ -1305,6 +1330,19 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     matchmakingQueue.delete(socket.id);
+    for (const [gameId, game] of activeGames.entries()) {
+      if (!game || game.isCpu) continue;
+      let changed = false;
+      if (game.whiteSocketId === socket.id) {
+        game.whiteSocketId = null;
+        changed = true;
+      }
+      if (game.blackSocketId === socket.id) {
+        game.blackSocketId = null;
+        changed = true;
+      }
+      if (changed) emitOpponentPresence(gameId, game);
+    }
   });
 });
 
