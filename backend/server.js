@@ -571,7 +571,7 @@ app.post('/api/federation/sync-event', (req, res) => {
   } else if (event === 'timeout') {
     game.status = 'timeout';
     game.resultWinner = data.winner;
-    io.to(game.id).emit('game_over', { reason: 'timeout', winner: data.winner });
+    emitTimeoutGameOver(game.id, data.winner);
     saveAndRemoveGame(game);
   }
 
@@ -1173,14 +1173,14 @@ io.on('connection', (socket) => {
           game.whiteTime = 0;
           game.status = 'timeout';
           game.resultWinner = 'b';
-          io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'b' });
+          emitTimeoutGameOver(gameId, 'b');
           saveAndRemoveGame(game);
           sendFederationEvent(game, 'timeout', { winner: 'b' });
       } else if (turn === 'b' && game.blackTime - elapsed <= 1) {
           game.blackTime = 0;
           game.status = 'timeout';
           game.resultWinner = 'w';
-          io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'w' });
+          emitTimeoutGameOver(gameId, 'w');
           saveAndRemoveGame(game);
           sendFederationEvent(game, 'timeout', { winner: 'w' });
       }
@@ -1308,6 +1308,14 @@ io.on('connection', (socket) => {
   });
 });
 
+
+function emitTimeoutGameOver(gameId, winner) {
+  const loser = winner === 'w' ? 'b' : 'w';
+  const payload = { reason: 'timeout', winner, loser };
+  io.to(gameId).emit('game_over', payload);
+  return payload;
+}
+
 function updateGameTime(game) {
     if (game.timeControl === 'unlimited') return;
 
@@ -1344,14 +1352,14 @@ setInterval(() => {
             game.whiteTime = 0;
             game.status = 'timeout';
             game.resultWinner = 'b';
-            io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'b' });
+            emitTimeoutGameOver(gameId, 'b');
             saveAndRemoveGame(game);
             sendFederationEvent(game, 'timeout', { winner: 'b' });
         } else if (turn === 'b' && game.blackTime - elapsed <= 0) {
             game.blackTime = 0;
             game.status = 'timeout';
             game.resultWinner = 'w';
-            io.to(gameId).emit('game_over', { reason: 'timeout', winner: 'w' });
+            emitTimeoutGameOver(gameId, 'w');
             saveAndRemoveGame(game);
             sendFederationEvent(game, 'timeout', { winner: 'w' });
         }
