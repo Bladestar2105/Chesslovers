@@ -33,6 +33,8 @@ function Game({ socket, sessionId, deviceId }) {
   const [toastMessage, setToastMessage] = useState('');
   const [confirmAction, setConfirmAction] = useState(null);
 
+  const isValidTime = useCallback((value) => Number.isFinite(value), []);
+
   const normalizeWinner = useCallback((winnerValue) => {
     if (winnerValue === 'white') return 'w';
     if (winnerValue === 'black') return 'b';
@@ -298,23 +300,30 @@ function Game({ socket, sessionId, deviceId }) {
 
   // Timer effect
   useEffect(() => {
-    if (status !== 'active' || timeControl === 'unlimited' || !lastMoveTime || waitingForOpponent) return;
+    if (status !== 'active' || timeControl === 'unlimited' || !isValidTime(lastMoveTime) || waitingForOpponent) return;
 
     const interval = setInterval(() => {
       const now = Date.now();
       const elapsed = (now - lastMoveTime) / 1000;
+      if (!isValidTime(elapsed) || elapsed < 0) return;
       const turn = chess.turn();
 
       if (turn === 'w') {
         setWhiteTime(prev => {
+          if (!isValidTime(prev)) {
+            return isValidTime(whiteTime) ? whiteTime : prev;
+          }
           const newTime = Math.max(0, prev - elapsed);
-          if (newTime === 0 && prev > 0) socket.emit('timeout', { gameId: id, sessionId });
+          if (newTime === 0 && prev > 0 && isValidTime(newTime)) socket.emit('timeout', { gameId: id, sessionId });
           return newTime;
         });
       } else {
         setBlackTime(prev => {
+          if (!isValidTime(prev)) {
+            return isValidTime(blackTime) ? blackTime : prev;
+          }
           const newTime = Math.max(0, prev - elapsed);
-          if (newTime === 0 && prev > 0) socket.emit('timeout', { gameId: id, sessionId });
+          if (newTime === 0 && prev > 0 && isValidTime(newTime)) socket.emit('timeout', { gameId: id, sessionId });
           return newTime;
         });
       }
@@ -322,10 +331,10 @@ function Game({ socket, sessionId, deviceId }) {
     }, 100);
 
     return () => clearInterval(interval);
-  }, [status, timeControl, lastMoveTime, waitingForOpponent, chess, socket, id, sessionId]);
+  }, [status, timeControl, lastMoveTime, waitingForOpponent, chess, socket, id, sessionId, isValidTime, whiteTime, blackTime]);
 
   const formatTime = (seconds) => {
-    if (seconds === null || seconds === undefined) return '';
+    if (!isValidTime(seconds)) return '';
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     const ms = Math.floor((seconds % 1) * 10);
