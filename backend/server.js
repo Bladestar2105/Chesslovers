@@ -43,6 +43,7 @@ const activeSeries = new Map(); // seriesId -> { players: [a,b], score: {a,b}, g
 let federationExchangeCodes = new Map();
 const federationStatus = new Map(); // id -> { isActive: boolean, version: string, lastSeen: number }
 const adminLoginAttempts = new Map(); // ip -> { count, firstAttemptAt, blockedUntil }
+const invalidMoveMetrics = new Map(); // sessionId -> count
 
 const DEFAULT_RATING = 1200;
 const K_FACTOR = 24;
@@ -208,6 +209,17 @@ app.delete('/api/admin/replays/:id', authenticateAdmin, (req, res) => {
 app.delete('/api/admin/replays', authenticateAdmin, (req, res) => {
   db.deleteAllReplays();
   res.json({ success: true });
+});
+
+app.get('/api/admin/metrics/invalid-moves', authenticateAdmin, (req, res) => {
+  let total = 0;
+  const sessions = [];
+  for (const [sessionId, count] of invalidMoveMetrics.entries()) {
+    total += count;
+    sessions.push({ sessionId, count });
+  }
+  sessions.sort((a, b) => b.count - a.count);
+  res.json({ total, sessions });
 });
 
 app.delete('/api/admin/federation/link/:id', authenticateAdmin, (req, res) => {
@@ -1075,8 +1087,15 @@ io.on('connection', (socket) => {
       }
     } catch (e) {
       // Invalid move
+      invalidMoveMetrics.set(normalizedSessionId, (invalidMoveMetrics.get(normalizedSessionId) || 0) + 1);
       socket.emit('error', 'Invalid move');
     }
+  });
+
+  socket.on('client_metric', ({ sessionId, name }) => {
+    const normalizedSessionId = normalizeSessionId(sessionId);
+    if (!normalizedSessionId || name !== 'invalid_move') return;
+    invalidMoveMetrics.set(normalizedSessionId, (invalidMoveMetrics.get(normalizedSessionId) || 0) + 1);
   });
 
   socket.on('resign', ({ gameId, sessionId }) => {
