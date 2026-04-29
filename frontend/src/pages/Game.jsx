@@ -423,7 +423,7 @@ function Game({ socket, sessionId, deviceId }) {
 
         {/* Game status banner */}
         {gameResult && (
-          <div className={`w-full max-w-lg p-4 rounded text-center text-xl font-bold ${
+          <div data-testid="game-result-banner" className={`w-full max-w-lg p-4 rounded text-center text-xl font-bold ${
             gameResult.winner === side 
               ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100' 
               : gameResult.winner === null 
@@ -484,6 +484,7 @@ function Game({ socket, sessionId, deviceId }) {
             {t('Resign')}
           </button>
           <button
+            data-testid="offer-draw-button"
             onClick={handleDrawOffer}
             disabled={status !== 'active' || waitingForOpponent}
             className="flex-1 py-2 bg-gray-500 hover:bg-gray-600 text-white font-bold rounded disabled:opacity-50"
@@ -596,19 +597,21 @@ function Game({ socket, sessionId, deviceId }) {
       )}
 
       {confirmAction && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div data-testid="confirm-action-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="panel p-6 rounded shadow-lg max-w-sm w-full">
             <p className="mb-4 font-semibold">
               {confirmAction === 'resign' ? t('Are you sure you want to resign?') : t('Opponent offered a draw. Accept?')}
             </p>
             <div className="flex justify-end gap-2">
               <button
+                data-testid="confirm-action-cancel"
                 onClick={() => setConfirmAction(null)}
                 className="px-4 py-2 bg-gray-300 hover:bg-gray-400 dark:bg-gray-600 dark:hover:bg-gray-500 rounded"
               >
                 {t('Cancel')}
               </button>
               <button
+                data-testid="confirm-action-accept"
                 onClick={executeConfirmAction}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
               >
