@@ -69,7 +69,16 @@ function Game({ socket, sessionId, deviceId }) {
       setSeriesState(data.seriesState || null);
       if (data.whiteName) setWhiteName(data.whiteName);
       if (data.blackName) setBlackName(data.blackName);
-      setWaitingForOpponent(data.isCpu ? false : (data.side === 'w' && !data.lastMoveTime && data.timeControl !== 'unlimited'));
+
+      const hasOpponentPresence = Boolean(
+        data.black ||
+        data.blackName ||
+        data.blackPlayerKey ||
+        data.participants?.black ||
+        data.participants?.opponent ||
+        data.opponentPresent
+      );
+      setWaitingForOpponent(data.isCpu ? false : (data.side === 'w' && !hasOpponentPresence));
       
       // Update move history from PGN
       if (data.pgn) {
