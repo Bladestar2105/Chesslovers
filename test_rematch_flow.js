@@ -54,7 +54,7 @@ function maybeVerifyAndExit() {
 }
 
 socketA.on('connect', () => {
-  socketA.emit('create_friend_game', {
+  socketA.emit('create_game', {
     timeControl: '3|0',
     sessionId: playerA.sessionId,
     playerName: playerA.playerName,
@@ -68,6 +68,16 @@ socketA.on('game_created', ({ gameId }) => {
   socketB.emit('join_friend_game', {
     gameId,
     timeControl: '3|0',
+    sessionId: playerB.sessionId,
+    playerName: playerB.playerName,
+    playerKey: playerB.playerKey,
+  });
+});
+
+socketB.on('game_created', ({ gameId }) => {
+  if (gameId !== oldGameId) return;
+  socketB.emit('join_game', {
+    gameId,
     sessionId: playerB.sessionId,
     playerName: playerB.playerName,
     playerKey: playerB.playerKey,
